@@ -1,0 +1,6 @@
+{
+  "name": "EKUMBI EXPRESS - Sistema Inteligente de Reservas Ferroviárias",
+  "description": "Plataforma moderna e inteligente de reservas de bilhetes de comboio e gestão de viagens ferroviárias em Angola.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
