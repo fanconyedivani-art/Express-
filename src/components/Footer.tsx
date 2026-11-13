@@ -1,12 +1,14 @@
 import React from 'react';
 import { EkumbiLogo } from './EkumbiLogo.tsx';
-import { Phone, Mail, MapPin, Clock, ShieldCheck, Award, MessageCircle } from 'lucide-react';
+import { Phone, Mail, MapPin, Clock, ShieldCheck, Award, MessageCircle, LogIn } from 'lucide-react';
 
 interface FooterProps {
   onSelectTab: (tab: string) => void;
+  onOpenAdminRegister?: () => void;
+  onOpenAdminLogin?: () => void;
 }
 
-export const Footer: React.FC<FooterProps> = ({ onSelectTab }) => {
+export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenAdminRegister, onOpenAdminLogin }) => {
   const currentYear = new Date().getFullYear();
 
   return (
@@ -146,6 +148,25 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab }) => {
                   <p className="text-xs text-neutral-500">Segunda a Domingo: 05:00 – 22:30</p>
                 </div>
               </div>
+            </div>
+
+            <div className="mt-5 pt-4 border-t border-neutral-800 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => onOpenAdminRegister?.()}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-amber-500/50 text-amber-400 text-[11px] font-bold text-center leading-tight transition-colors cursor-pointer"
+              >
+                <ShieldCheck className="w-4 h-4 shrink-0" />
+                <span>Cadastrar Administrador</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenAdminLogin?.()}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 border border-emerald-500 text-white text-[11px] font-bold text-center leading-tight transition-colors cursor-pointer"
+              >
+                <LogIn className="w-4 h-4 shrink-0" />
+                <span>Logar Administrador</span>
+              </button>
             </div>
           </div>
         </div>

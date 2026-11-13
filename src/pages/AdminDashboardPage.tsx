@@ -34,22 +34,43 @@ import {
   ExternalLink
 } from 'lucide-react';
 
+interface AdminBookingWithReceipt extends Booking {
+  receipt?: PaymentReceipt | null;
+}
+
+interface OutgoingCommunicationLog {
+  id: string;
+  channel: 'whatsapp' | 'sms' | 'email';
+  recipient: string;
+  subject?: string;
+  message: string;
+  status: 'enviado' | 'pendente' | 'falha';
+  sentAt: string;
+  metadata?: any;
+}
+
+type AdminTab = 'dashboard' | 'operacoes' | 'pagamentos' | 'viagens' | 'bilhetes' | 'validacao' | 'clientes' | 'logs';
+
 interface AdminDashboardPageProps {
   currentUser: User;
   onOpenTicket: (ticket: Ticket) => void;
+  initialTab?: AdminTab;
 }
 
 export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   currentUser,
-  onOpenTicket
+  onOpenTicket,
+  initialTab = 'dashboard'
 }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'operacoes' | 'pagamentos' | 'viagens' | 'validacao' | 'clientes' | 'logs'>('dashboard');
+  const [activeTab, setActiveTab] = useState<AdminTab>(initialTab);
 
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [trips, setTrips] = useState<Trip[]>([]);
-  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [bookings, setBookings] = useState<AdminBookingWithReceipt[]>([]);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
   const [clients, setClients] = useState<User[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [commLogs, setCommLogs] = useState<OutgoingCommunicationLog[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Travel Alert Trigger Form State (NEW FEATURE!)
@@ -89,6 +110,11 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
 
   // Search & filter query
   const [searchQuery, setSearchQuery] = useState('');
+  const [ticketSearchQuery, setTicketSearchQuery] = useState('');
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
 
   useEffect(() => {
     fetchAllData();
@@ -97,11 +123,14 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   const fetchAllData = async () => {
     try {
       setLoading(true);
-      const [resStats, resTrips, resClients, resLogs] = await Promise.all([
+      const [resStats, resTrips, resClients, resLogs, resBookings, resTickets, resComms] = await Promise.all([
         fetch('/api/admin/stats'),
         fetch('/api/trips'),
         fetch('/api/admin/clients'),
-        fetch('/api/admin/audit-logs')
+        fetch('/api/admin/audit-logs'),
+        fetch('/api/admin/bookings'),
+        fetch('/api/admin/tickets'),
+        fetch('/api/admin/communication-logs')
       ]);
 
       if (resStats.ok) setStats(await resStats.json());
@@ -112,10 +141,9 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       }
       if (resClients.ok) setClients(await resClients.json());
       if (resLogs.ok) setAuditLogs(await resLogs.json());
-
-      // Fetch all bookings for payment review
-      const resB = await fetch('/api/trips'); // placeholder or admin bookings
-      // In our server, bookings are in dbService
+      if (resBookings.ok) setBookings(await resBookings.json());
+      if (resTickets.ok) setTickets(await resTickets.json());
+      if (resComms.ok) setCommLogs(await resComms.json());
     } catch (err) {
       console.error('Error fetching admin data', err);
     } finally {
@@ -171,9 +199,10 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   // ----------------------------------------------------------------
   // ATOMIC BOARDING PASS VALIDATION (SECTION 16)
   // ----------------------------------------------------------------
-  const handleValidateTicket = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validationCode.trim()) return;
+  const handleValidateTicket = async (e?: React.FormEvent, overrideCode?: string) => {
+    if (e) e.preventDefault();
+    const codeToValidate = (overrideCode ?? validationCode).trim();
+    if (!codeToValidate) return;
 
     setIsValidating(true);
     setValidationResult(null);
@@ -182,11 +211,12 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       const res = await fetch('/api/tickets/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ codeOrQr: validationCode.trim() })
+        body: JSON.stringify({ codeOrQr: codeToValidate })
       });
 
       const data = await res.json();
       setValidationResult(data);
+      if (overrideCode) setValidationCode(overrideCode);
       fetchAllData();
     } catch (err) {
       console.error(err);
@@ -197,16 +227,15 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   };
 
   // ----------------------------------------------------------------
-  // PAYMENT APPROVAL / REJECTION
+  // PAYMENT APPROVAL / REJECTION & REFUNDS
   // ----------------------------------------------------------------
   const handleApprovePayment = async (bookingId: string) => {
     try {
       const res = await fetch(`/api/payments/${bookingId}/approve`, {
         method: 'POST'
       });
-      const data = await res.json();
       if (res.ok) {
-        alert('Pagamento validado com sucesso! Os bilhetes digitais foram emitidos.');
+        alert('Pagamento validado com sucesso! Os bilhetes digitais foram emitidos e o passageiro foi notificado.');
         fetchAllData();
       }
     } catch (err) {
@@ -225,8 +254,58 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       });
 
       if (res.ok) {
-        alert('Pagamento rejeitado e motivo registado.');
+        alert('Pagamento rejeitado, motivo registado e cliente notificado.');
         setRejectingBookingId(null);
+        fetchAllData();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleRefundDecision = async (bookingId: string, decision: 'aprovado' | 'rejeitado', totalAmount: number) => {
+    try {
+      const res = await fetch(`/api/admin/bookings/${bookingId}/refund-decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          decision,
+          refundAmount: Math.round(totalAmount * 0.9),
+          notes: decision === 'aprovado' ? 'Taxa administrativa de 10% aplicada. Assentos libertados.' : 'Prazo comercial expirado.'
+        })
+      });
+      if (res.ok) {
+        alert(`Reembolso ${decision} com sucesso!`);
+        fetchAllData();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCancelTrip = async (tripId: string) => {
+    try {
+      const res = await fetch(`/api/trips/${tripId}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        alert('Viagem cancelada e alertas enviados aos passageiros confirmados.');
+        fetchAllData();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCancelTicket = async (ticketId: string) => {
+    try {
+      const res = await fetch(`/api/admin/tickets/${ticketId}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Cancelado pelo painel administrativo' })
+      });
+      if (res.ok) {
+        alert('Bilhete cancelado com sucesso.');
         fetchAllData();
       }
     } catch (err) {
@@ -312,7 +391,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             PAINEL ADMINISTRATIVO – EKUMBI EXPRESS
           </h1>
           <p className="text-xs text-neutral-400 mt-1">
-            Gestão operacional de comboios, validação de bilhetes, controle financeiro e disparo de alertas em tempo real.
+            Gestão operacional de comboios, fiscalização de embarque e validação de bilhetes, controle financeiro e disparo de alertas em tempo real.
           </p>
         </div>
 
@@ -325,7 +404,7 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
           <div className="px-4 py-2 rounded-xl bg-amber-400/10 border border-amber-400/30 text-amber-300 text-xs font-bold font-mono">
-            Admin: {currentUser.name.split(' ')[0]}
+            Admin & Fiscal: {currentUser.name.split(' ')[0]}
           </div>
         </div>
       </div>
@@ -357,6 +436,18 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveTab('pagamentos')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'pagamentos'
+              ? 'bg-neutral-900 text-amber-400 shadow-md'
+              : 'bg-white text-neutral-700 hover:bg-neutral-100 border border-neutral-200'
+          }`}
+        >
+          <CreditCard className="w-4 h-4" />
+          <span>Pagamentos & Reembolsos ({bookings.length})</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('validacao')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
             activeTab === 'validacao'
@@ -365,7 +456,19 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
           }`}
         >
           <QrCode className="w-4 h-4" />
-          <span>Validação de Bilhetes</span>
+          <span>Fiscalização & Validação</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('bilhetes')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+            activeTab === 'bilhetes'
+              ? 'bg-neutral-900 text-amber-400 shadow-md'
+              : 'bg-white text-neutral-700 hover:bg-neutral-100 border border-neutral-200'
+          }`}
+        >
+          <TicketIcon className="w-4 h-4" />
+          <span>Bilhetes ({tickets.length})</span>
         </button>
 
         <button
@@ -491,6 +594,90 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                 Conforme compromisso EKUMBI
               </span>
             </div>
+          </div>
+
+          {/* Integrated Fiscal Boarding Validation Widget on the Same Admin Screen */}
+          <div className="p-6 rounded-3xl bg-white border border-neutral-200 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                  <QrCode className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-display font-bold text-base text-neutral-900">
+                    Fiscalização & Validação de Embarque
+                  </h3>
+                  <p className="text-xs text-neutral-500">
+                    Valide bilhetes pelo código de 10 dígitos ou token QR diretamente nesta tela, sem mudar de conta.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 text-xs">
+                <span className="px-3 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold font-mono">
+                  {tickets.filter(t => t.status === 'valido').length} válidos
+                </span>
+                <span className="px-3 py-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 font-bold font-mono">
+                  {tickets.filter(t => t.status === 'utilizado').length} embarcados
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('validacao')}
+                  className="text-xs font-bold text-red-600 hover:underline cursor-pointer"
+                >
+                  Abrir painel completo
+                </button>
+              </div>
+            </div>
+
+            <form onSubmit={e => handleValidateTicket(e)} className="flex flex-col sm:flex-row gap-3">
+              <input
+                type="text"
+                required
+                value={validationCode}
+                onChange={e => setValidationCode(e.target.value)}
+                placeholder="Digite o código de 10 dígitos ou Token QR (Ex: 8492019384)"
+                className="flex-1 px-4 py-2.5 text-xs rounded-xl border border-neutral-300 focus:outline-hidden focus:ring-2 focus:ring-red-600 font-mono"
+              />
+              <button
+                type="submit"
+                disabled={isValidating || !validationCode.trim()}
+                className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs uppercase tracking-wider shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 whitespace-nowrap"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>{isValidating ? 'A validar...' : 'Validar Embarque'}</span>
+              </button>
+            </form>
+
+            {validationResult && (
+              <div className={`p-4 rounded-2xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                validationResult.valid
+                  ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                  : validationResult.status === 'utilizado'
+                  ? 'bg-amber-50 border-amber-300 text-amber-900'
+                  : 'bg-red-50 border-red-300 text-red-900'
+              }`}>
+                <div className="flex items-start gap-2.5">
+                  {validationResult.valid ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <XCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                  )}
+                  <div>
+                    <strong className="font-display font-bold text-sm block">{validationResult.message}</strong>
+                    <span>{validationResult.details}</span>
+                  </div>
+                </div>
+                {validationResult.ticket && (
+                  <div className="text-[11px] font-mono bg-white/80 px-3 py-2 rounded-xl border border-neutral-200 shrink-0">
+                    <div>{validationResult.ticket.passengerName}</div>
+                    <div className="text-red-700 font-bold">
+                      Carruagem {validationResult.ticket.carriageNumber} · Assento {validationResult.ticket.seatNumber}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Visual Charts & Breakdown (Section 15) */}
@@ -840,6 +1027,175 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                 <p>✓ Todas as mensagens são guardadas no livro de registo de bordo.</p>
               </div>
             </div>
+
+            {/* Live Outgoing SMS/Email/WhatsApp Dispatch Logs */}
+            <div className="p-6 rounded-3xl bg-white border border-neutral-200 shadow-sm space-y-3">
+              <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
+                <h4 className="font-display font-bold text-sm text-neutral-900">
+                  Registo de Alertas Disparados (SMS / E-mail / WhatsApp)
+                </h4>
+                <span className="font-mono text-xs text-neutral-500">{commLogs.length} envios</span>
+              </div>
+
+              {commLogs.length === 0 ? (
+                <p className="text-xs text-neutral-500 py-4 text-center">
+                  Nenhum envio automático registado nesta sessão. Dispare um alerta para ver os logs de entrega.
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {commLogs.slice(0, 10).map(log => (
+                    <div key={log.id} className="p-3 rounded-xl bg-neutral-50 border border-neutral-200 text-xs">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-bold uppercase text-[10px] px-2 py-0.5 rounded bg-neutral-900 text-amber-300">
+                          {log.channel}
+                        </span>
+                        <span className="text-[10px] font-mono text-emerald-700 font-bold">
+                          ✓ {log.status} · {new Date(log.sentAt).toLocaleTimeString('pt-AO', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <p className="font-semibold text-neutral-800 truncate">{log.recipient}</p>
+                      <p className="text-[11px] text-neutral-600 line-clamp-2 mt-0.5">{log.message}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* TAB: PAGAMENTOS, COMPROVATIVOS & REEMBOLSOS */}
+      {/* ------------------------------------------------------------- */}
+      {activeTab === 'pagamentos' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-3xl border border-neutral-200 p-6 sm:p-8 shadow-sm space-y-6">
+            <div>
+              <h2 className="font-display font-bold text-xl text-neutral-900">
+                Gestão de Pagamentos, Comprovativos & Reembolsos
+              </h2>
+              <p className="text-xs text-neutral-500 mt-1">
+                Analise comprovativos submetidos com suporte OCR, confirme créditos bancários ou aprove solicitações de cancelamento.
+              </p>
+            </div>
+
+            {bookings.length === 0 ? (
+              <p className="text-xs text-neutral-500 py-8 text-center">Nenhuma reserva encontrada.</p>
+            ) : (
+              <div className="space-y-4">
+                {bookings.map(b => (
+                  <div key={b.id} className="p-5 rounded-2xl bg-neutral-50 border border-neutral-200 space-y-4">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-bold text-xs text-red-700 bg-red-50 px-2.5 py-0.5 rounded border border-red-200">
+                            {b.bookingCode}
+                          </span>
+                          <span className="text-xs font-bold text-neutral-900">{b.userFullName}</span>
+                          <span className="text-xs text-neutral-500">({b.userPhone})</span>
+                        </div>
+                        <p className="text-xs text-neutral-600 mt-1">
+                          {b.originStation} ➔ {b.destinationStation} · {b.travelDate} ({b.departureTime}) · Classe {b.travelClass}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <div className="text-right">
+                          <span className="text-[10px] text-neutral-400 uppercase block">Montante</span>
+                          <span className="font-mono font-black text-base text-neutral-900">
+                            {b.totalAmount.toLocaleString('pt-AO')} Kz
+                          </span>
+                        </div>
+                        <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full ${
+                          b.paymentStatus === 'pagamento_confirmado'
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                            : b.paymentStatus === 'pagamento_rejeitado'
+                            ? 'bg-red-100 text-red-800 border border-red-300'
+                            : b.paymentStatus === 'reembolso'
+                            ? 'bg-purple-100 text-purple-800 border border-purple-300'
+                            : 'bg-amber-100 text-amber-800 border border-amber-300'
+                        }`}>
+                          {b.paymentStatus.replace(/_/g, ' ')}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* OCR Receipt Analysis Panel if uploaded */}
+                    {b.receipt && (
+                      <div className="p-4 rounded-xl bg-white border border-neutral-200 text-xs space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-neutral-900 flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                            Comprovativo Anexado: {b.receipt.fileName}
+                          </span>
+                          {b.receipt.analysis && (
+                            <span className="font-mono text-[11px] text-emerald-700 font-bold">
+                              OCR Confiança: {b.receipt.analysis.confidenceScore}%
+                            </span>
+                          )}
+                        </div>
+                        {b.receipt.analysis && (
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-neutral-600 pt-1">
+                            <div>Banco: <strong className="text-neutral-900">{b.receipt.analysis.bankName}</strong></div>
+                            <div>ID Transação: <strong className="font-mono text-neutral-900">{b.receipt.analysis.transactionId}</strong></div>
+                            <div>Valor OCR: <strong className="font-mono text-neutral-900">{(b.receipt.analysis.amount || 0).toLocaleString('pt-AO')} Kz</strong></div>
+                            <div>Correspondência: <strong className={b.receipt.analysis.isAmountMatching ? 'text-emerald-700' : 'text-red-600'}>{b.receipt.analysis.isAmountMatching ? 'Conforme' : 'Divergente'}</strong></div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Action Controls */}
+                    <div className="flex items-center justify-between pt-2 border-t border-neutral-200/70 gap-3 flex-wrap">
+                      <div className="text-xs text-neutral-500">
+                        Método: <strong className="text-neutral-800 uppercase">{b.paymentMethod.replace(/_/g, ' ')}</strong>
+                        {b.refundStatus && (
+                          <span className="ml-3 text-amber-800 font-semibold">
+                            · Pedido Cancelamento: {b.refundStatus} ({b.cancellationReason})
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {(b.paymentStatus === 'aguardando_pagamento' || b.paymentStatus === 'comprovativo_recebido' || b.paymentStatus === 'em_analise') && (
+                          <>
+                            <button
+                              onClick={() => handleApprovePayment(b.id)}
+                              className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
+                            >
+                              Confirmar Pagamento
+                            </button>
+                            <button
+                              onClick={() => setRejectingBookingId(b.id)}
+                              className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold cursor-pointer"
+                            >
+                              Rejeitar
+                            </button>
+                          </>
+                        )}
+
+                        {b.refundStatus === 'em_analise' && (
+                          <>
+                            <button
+                              onClick={() => handleRefundDecision(b.id, 'aprovado', b.totalAmount)}
+                              className="px-3.5 py-1.5 rounded-xl bg-neutral-900 hover:bg-black text-amber-300 text-xs font-bold cursor-pointer"
+                            >
+                              Aprovar Reembolso (90%) & Libertar Assentos
+                            </button>
+                            <button
+                              onClick={() => handleRefundDecision(b.id, 'rejeitado', b.totalAmount)}
+                              className="px-3.5 py-1.5 rounded-xl border border-neutral-300 text-neutral-700 hover:bg-neutral-100 text-xs font-bold cursor-pointer"
+                            >
+                              Rejeitar Pedido
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -848,20 +1204,21 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
       {/* TAB 3: VALIDAÇÃO DE BILHETES (SECTION 16) */}
       {/* ------------------------------------------------------------- */}
       {activeTab === 'validacao' && (
-        <div className="max-w-2xl mx-auto bg-white rounded-3xl border border-neutral-200 p-6 sm:p-8 shadow-sm">
-          <div className="text-center mb-6">
-            <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-3">
-              <QrCode className="w-6 h-6" />
+        <div className="max-w-3xl mx-auto space-y-6">
+          <div className="bg-white rounded-3xl border border-neutral-200 p-6 sm:p-8 shadow-sm">
+            <div className="text-center mb-6">
+              <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-3">
+                <QrCode className="w-6 h-6" />
+              </div>
+              <h2 className="font-display font-black text-2xl text-neutral-900">
+                FISCALIZAÇÃO & VALIDAÇÃO DE BILHETES DE EMBARQUE
+              </h2>
+              <p className="text-xs text-neutral-500 max-w-md mx-auto mt-1">
+                Controle atómico de acesso à composição ferroviária pelo administrador. Digite o código de 10 dígitos do bilhete ou o identificador do QR Code.
+              </p>
             </div>
-            <h2 className="font-display font-black text-2xl text-neutral-900">
-              VALIDAÇÃO DE BILHETES DE EMBARQUE
-            </h2>
-            <p className="text-xs text-neutral-500 max-w-md mx-auto mt-1">
-              Controle atómico de acesso à composição ferroviária. Digite o código de 10 dígitos do bilhete ou o identificador do QR Code lido pela câmara.
-            </p>
-          </div>
 
-          <form onSubmit={handleValidateTicket} className="space-y-4">
+            <form onSubmit={e => handleValidateTicket(e)} className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-neutral-700 mb-1">
                 Código Numérico de 10 Dígitos ou Token QR *
@@ -940,6 +1297,60 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
               )}
             </div>
           )}
+          </div>
+
+          {/* Pending & Validated Boarding Passes List for Quick Fiscal Inspection */}
+          <div className="bg-white rounded-3xl border border-neutral-200 p-6 sm:p-8 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-display font-bold text-base text-neutral-900">
+                Controlo Rápido de Passageiros por Bilhete
+              </h3>
+              <span className="text-xs text-neutral-500 font-mono">
+                {tickets.filter(t => t.status === 'valido').length} por embarcar · {tickets.filter(t => t.status === 'utilizado').length} validados
+              </span>
+            </div>
+
+            {tickets.length === 0 ? (
+              <p className="text-xs text-neutral-500 py-4 text-center">Nenhum bilhete emitido até ao momento.</p>
+            ) : (
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {tickets.map(t => (
+                  <div key={t.id} className="p-3.5 rounded-2xl bg-neutral-50 border border-neutral-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono font-bold text-red-600">{t.numericCode}</span>
+                        <span className="font-bold text-neutral-900">{t.passengerName}</span>
+                        <span className="text-neutral-500 font-mono">BI: {t.passengerBi}</span>
+                      </div>
+                      <div className="text-[11px] text-neutral-500 mt-0.5">
+                        {t.originStation} ➔ {t.destinationStation} · Carruagem {t.carriageNumber}, Assento {t.seatNumber}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        t.status === 'valido'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : t.status === 'utilizado'
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-red-100 text-red-800'
+                      }`}>
+                        {t.status}
+                      </span>
+                      {t.status === 'valido' && (
+                        <button
+                          type="button"
+                          onClick={() => handleValidateTicket(undefined, t.numericCode)}
+                          className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-[11px] cursor-pointer"
+                        >
+                          Validar Embarque
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1005,19 +1416,127 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                   <span className="text-neutral-500">
                     Assentos: <strong className="text-neutral-900 font-mono">{trip.availableSeats} / {trip.totalSeats}</strong> livres
                   </span>
-                  <button
-                    onClick={() => {
-                      setSelectedTripId(trip.id);
-                      setActiveTab('operacoes');
-                    }}
-                    className="text-red-600 font-bold hover:underline flex items-center gap-1 cursor-pointer"
-                  >
-                    <Radio className="w-3.5 h-3.5" />
-                    <span>Disparar Alerta</span>
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => {
+                        setSelectedTripId(trip.id);
+                        setActiveTab('operacoes');
+                      }}
+                      className="text-red-600 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <Radio className="w-3.5 h-3.5" />
+                      <span>Disparar Alerta</span>
+                    </button>
+                    {trip.status !== 'cancelada' && (
+                      <button
+                        onClick={() => handleCancelTrip(trip.id)}
+                        className="text-neutral-500 hover:text-red-600 font-semibold hover:underline cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* TAB: GESTÃO DE BILHETES */}
+      {/* ------------------------------------------------------------- */}
+      {activeTab === 'bilhetes' && (
+        <div className="bg-white rounded-3xl border border-neutral-200 p-6 sm:p-8 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <div>
+              <h2 className="font-display font-bold text-xl text-neutral-900">
+                Bilhetes Emitidos ({tickets.length})
+              </h2>
+              <p className="text-xs text-neutral-500">
+                Pesquise pelo código numérico de 10 dígitos, nome do passageiro ou BI.
+              </p>
+            </div>
+
+            <div className="relative w-full sm:w-72">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+              <input
+                type="text"
+                placeholder="Código de 10 dígitos ou nome..."
+                value={ticketSearchQuery}
+                onChange={e => setTicketSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-neutral-300 focus:outline-hidden focus:ring-2 focus:ring-red-600"
+              />
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 uppercase tracking-wider">
+                <tr>
+                  <th className="py-3 px-4">Código 10 Dígitos</th>
+                  <th className="py-3 px-4">Passageiro</th>
+                  <th className="py-3 px-4">Percurso</th>
+                  <th className="py-3 px-4">Lugar</th>
+                  <th className="py-3 px-4">Estado</th>
+                  <th className="py-3 px-4 text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100">
+                {tickets
+                  .filter(t => !ticketSearchQuery || t.numericCode.includes(ticketSearchQuery) || t.passengerName.toLowerCase().includes(ticketSearchQuery.toLowerCase()) || t.passengerBi.toLowerCase().includes(ticketSearchQuery.toLowerCase()))
+                  .map(t => (
+                    <tr key={t.id} className="hover:bg-neutral-50/50">
+                      <td className="py-3 px-4 font-mono font-bold text-red-600">{t.numericCode}</td>
+                      <td className="py-3 px-4">
+                        <div className="font-bold text-neutral-900">{t.passengerName}</div>
+                        <div className="text-[11px] font-mono text-neutral-500">BI: {t.passengerBi}</div>
+                      </td>
+                      <td className="py-3 px-4 text-neutral-600">
+                        {t.originStation} ➔ {t.destinationStation} ({t.travelDate})
+                      </td>
+                      <td className="py-3 px-4 font-mono text-neutral-800">
+                        Carruagem {t.carriageNumber} · {t.seatNumber}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                          t.status === 'valido'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : t.status === 'utilizado'
+                            ? 'bg-blue-100 text-blue-800'
+                            : 'bg-red-100 text-red-800'
+                        }`}>
+                          {t.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right space-x-3">
+                        <button
+                          onClick={() => onOpenTicket(t)}
+                          className="text-xs font-bold text-neutral-900 hover:text-red-600 cursor-pointer"
+                        >
+                          Ver QR / PDF
+                        </button>
+                        {t.status === 'valido' && (
+                          <>
+                            <button
+                              onClick={() => handleValidateTicket(undefined, t.numericCode)}
+                              className="text-xs font-bold text-emerald-700 hover:underline cursor-pointer"
+                            >
+                              Validar Embarque
+                            </button>
+                            <button
+                              onClick={() => handleCancelTicket(t.id)}
+                              className="text-xs font-bold text-red-600 hover:underline cursor-pointer"
+                            >
+                              Cancelar
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
@@ -1249,6 +1768,42 @@ export const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Rejeitar Pagamento */}
+      {rejectingBookingId && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-neutral-200">
+            <h3 className="font-display font-bold text-lg text-neutral-900 mb-2">
+              Rejeitar Comprovativo de Pagamento
+            </h3>
+            <p className="text-xs text-neutral-600 mb-4">
+              Informe o motivo da rejeição. O passageiro será notificado por e-mail, SMS e na sua área pessoal.
+            </p>
+            <textarea
+              rows={3}
+              value={rejectionReason}
+              onChange={e => setRejectionReason(e.target.value)}
+              className="w-full p-3 text-xs rounded-xl border border-neutral-300 focus:outline-hidden focus:ring-2 focus:ring-red-600 mb-4"
+            />
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setRejectingBookingId(null)}
+                className="px-4 py-2 rounded-xl border border-neutral-300 text-xs font-bold text-neutral-700"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                onClick={handleRejectPayment}
+                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold"
+              >
+                Confirmar Rejeição
+              </button>
+            </div>
           </div>
         </div>
       )}

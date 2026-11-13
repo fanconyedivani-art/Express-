@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Trip, TravelClass, TouristDestination } from '../types/index.ts';
+import React, { useState, useEffect } from 'react';
+import { Trip, TravelClass, TouristDestination, User } from '../types/index.ts';
 import {
   Train,
   Calendar,
@@ -17,12 +17,15 @@ import {
   ChevronRight,
   Eye,
   Compass,
-  MessageCircle
+  MessageCircle,
+  AlertCircle
 } from 'lucide-react';
 
 interface HomePageProps {
   trips: Trip[];
   destinations: TouristDestination[];
+  currentUser?: User | null;
+  onOpenAuth?: () => void;
   onSearchTrips: (origin: string, destination: string, date: string, passCount: number, travelClass: TravelClass) => void;
   onSelectTrip: (trip: Trip) => void;
   onOpenTouristDiscovery: (trip?: Trip) => void;
@@ -31,6 +34,8 @@ interface HomePageProps {
 export const HomePage: React.FC<HomePageProps> = ({
   trips,
   destinations,
+  currentUser,
+  onOpenAuth,
   onSearchTrips,
   onSelectTrip,
   onOpenTouristDiscovery
@@ -42,8 +47,24 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [travelClass, setTravelClass] = useState<TravelClass>('executiva');
   const [selectedPhotoZoom, setSelectedPhotoZoom] = useState<string | null>(null);
 
+  const [searchAuthWarning, setSearchAuthWarning] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (currentUser) {
+      setSearchAuthWarning(null);
+    }
+  }, [currentUser]);
+
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) {
+      setSearchAuthWarning(
+        'Apenas passageiros cadastrados podem reservar viagens e comprar bilhetes. Crie a sua conta ou entre para continuar.'
+      );
+      onOpenAuth?.();
+      return;
+    }
+    setSearchAuthWarning(null);
     onSearchTrips(origin, destination, date, passengers, travelClass);
   };
 
@@ -98,6 +119,25 @@ export const HomePage: React.FC<HomePageProps> = ({
 
           {/* Form de Pesquisa de Viagens (Section 3 & 5) */}
           <div className="mt-10 max-w-5xl mx-auto p-4 sm:p-6 rounded-3xl bg-white text-neutral-900 shadow-2xl border border-neutral-100">
+            {!currentUser && (
+              <div className="mb-4 p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-left">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    {searchAuthWarning || 'Apenas passageiros cadastrados podem reservar viagens e comprar bilhetes.'}
+                  </span>
+                </div>
+                {onOpenAuth && (
+                  <button
+                    type="button"
+                    onClick={onOpenAuth}
+                    className="px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-black text-amber-400 font-bold text-[11px] whitespace-nowrap cursor-pointer"
+                  >
+                    Já sou cadastrado — Entrar
+                  </button>
+                )}
+              </div>
+            )}
             <form onSubmit={handleSearchSubmit} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-left">
                 {/* Origem */}

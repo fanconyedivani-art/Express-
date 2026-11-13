@@ -11,6 +11,8 @@ import { AdminDashboardPage } from './pages/AdminDashboardPage.tsx';
 import { TicketViewModal } from './components/TicketViewModal.tsx';
 import { TouristDiscoveryModal } from './components/TouristDiscoveryModal.tsx';
 import { AuthModal } from './components/AuthModal.tsx';
+import { AdminRegisterModal } from './components/AdminRegisterModal.tsx';
+import { AdminLoginModal } from './components/AdminLoginModal.tsx';
 import {
   Trip,
   TravelClass,
@@ -52,6 +54,8 @@ export default function App() {
   const [touristModalOpen, setTouristModalOpen] = useState(false);
   const [selectedTouristTrip, setSelectedTouristTrip] = useState<Trip | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [adminRegisterModalOpen, setAdminRegisterModalOpen] = useState(false);
+  const [adminLoginModalOpen, setAdminLoginModalOpen] = useState(false);
   const [notificationsModalOpen, setNotificationsModalOpen] = useState(false);
 
   // Search pre-filters for trips page
@@ -103,7 +107,7 @@ export default function App() {
   };
 
   // Switch demo roles
-  const handleSwitchRole = async (role: 'cliente' | 'admin' | 'validador') => {
+  const handleSwitchRole = async (role: 'cliente' | 'admin') => {
     try {
       const res = await fetch('/api/auth/switch-user', {
         method: 'POST',
@@ -114,7 +118,6 @@ export default function App() {
         const data = await res.json();
         setCurrentUser(data.user);
         if (role === 'admin') setCurrentTab('admin');
-        else if (role === 'validador') setCurrentTab('admin');
         else setCurrentTab('inicio');
         fetchNotifications();
       }
@@ -123,8 +126,33 @@ export default function App() {
     }
   };
 
-  // Start booking flow from home or trips page
+  // Open passenger screen without login
+  const handleOpenPassengerWithoutLogin = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (err) {
+      console.error(err);
+    }
+    setCurrentUser(null);
+    setCurrentTab('inicio');
+    fetchNotifications();
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    try {
+      await fetch('/api/notifications/mark-all-read', { method: 'POST' });
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Start booking flow from home or trips page (requires registered user)
   const handleSelectTrip = (trip: Trip) => {
+    if (!currentUser) {
+      setAuthModalOpen(true);
+      return;
+    }
     setSelectedTrip(trip);
     setCurrentTab('assentos');
   };
@@ -203,15 +231,21 @@ export default function App() {
         currentTab={currentTab}
         onSelectTab={tab => {
           if (tab === 'reservar') {
-            setCurrentTab('viagens');
+            if (!currentUser) {
+              setCurrentTab('inicio');
+              setAuthModalOpen(true);
+            } else {
+              setCurrentTab('viagens');
+            }
           } else {
             setCurrentTab(tab);
           }
         }}
         currentUser={currentUser}
         onOpenAuth={() => setAuthModalOpen(true)}
-        onLogout={() => handleSwitchRole('cliente')}
+        onLogout={handleOpenPassengerWithoutLogin}
         onSwitchRole={handleSwitchRole}
+        onOpenPassengerGuest={handleOpenPassengerWithoutLogin}
         notifications={notifications}
         onOpenNotifications={() => setNotificationsModalOpen(true)}
       />
@@ -223,6 +257,8 @@ export default function App() {
           <HomePage
             trips={trips}
             destinations={destinations}
+            currentUser={currentUser}
+            onOpenAuth={() => setAuthModalOpen(true)}
             onSearchTrips={handleSearchTrips}
             onSelectTrip={handleSelectTrip}
             onOpenTouristDiscovery={handleOpenTouristDiscovery}
@@ -543,7 +579,7 @@ export default function App() {
         )}
 
         {/* ADMIN & BOARDING VALIDATOR PANEL */}
-        {currentTab === 'admin' && (
+        {(currentTab === 'admin' || currentTab === 'validacao') && (
           <AdminDashboardPage
             currentUser={currentUser || {
               id: 'admin',
@@ -556,12 +592,17 @@ export default function App() {
               loginCount: 1
             }}
             onOpenTicket={t => setActiveTicketModal(t)}
+            initialTab={currentTab === 'validacao' ? 'validacao' : 'dashboard'}
           />
         )}
       </main>
 
       {/* 4. Footer */}
-      <Footer onSelectTab={tab => setCurrentTab(tab)} />
+      <Footer
+        onSelectTab={tab => setCurrentTab(tab)}
+        onOpenAdminRegister={() => setAdminRegisterModalOpen(true)}
+        onOpenAdminLogin={() => setAdminLoginModalOpen(true)}
+      />
 
       {/* 5. Modals */}
       <TouristDiscoveryModal
@@ -585,6 +626,27 @@ export default function App() {
           setCurrentUser(u);
           fetchNotifications();
         }}
+      />
+
+      <AdminRegisterModal
+        isOpen={adminRegisterModalOpen}
+        onClose={() => setAdminRegisterModalOpen(false)}
+        onSuccess={u => {
+          setCurrentUser(u);
+          setCurrentTab('admin');
+          fetchNotifications();
+        }}
+      />
+
+      <AdminLoginModal
+        isOpen={adminLoginModalOpen}
+        onClose={() => setAdminLoginModalOpen(false)}
+        onSuccess={u => {
+          setCurrentUser(u);
+          setCurrentTab('admin');
+          fetchNotifications();
+        }}
+        onOpenRegisterAdmin={() => setAdminRegisterModalOpen(true)}
       />
 
       {/* Real-time Notifications Popover Modal */}
@@ -635,10 +697,16 @@ export default function App() {
               )}
             </div>
 
-            <div className="pt-4 border-t border-neutral-100 mt-4 flex justify-end">
+            <div className="pt-4 border-t border-neutral-100 mt-4 flex items-center justify-between">
+              <button
+                onClick={handleMarkAllNotificationsRead}
+                className="text-xs font-bold text-red-600 hover:underline cursor-pointer"
+              >
+                Marcar todas como lidas
+              </button>
               <button
                 onClick={() => setNotificationsModalOpen(false)}
-                className="px-5 py-2 rounded-xl bg-neutral-900 text-white text-xs font-bold"
+                className="px-5 py-2 rounded-xl bg-neutral-900 text-white text-xs font-bold cursor-pointer"
               >
                 Fechar
               </button>

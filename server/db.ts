@@ -406,7 +406,7 @@ class DatabaseService {
           { stationName: 'Estação Central de Malanje', province: 'Malanje', arrivalTime: '13:00', departureTime: '13:00', touristSpot: 'Quedas de Kalandula' }
         ],
         totalSeats: 160,
-        availableSeats: 142
+        availableSeats: 160
       },
       {
         id: 'trip-002',
@@ -436,7 +436,7 @@ class DatabaseService {
           { stationName: 'Estação Central do Bungo', province: 'Luanda', arrivalTime: '21:00', departureTime: '21:00' }
         ],
         totalSeats: 120,
-        availableSeats: 108
+        availableSeats: 120
       },
       {
         id: 'trip-003',
@@ -466,7 +466,7 @@ class DatabaseService {
           { stationName: 'Estação Central de Malanje', province: 'Malanje', arrivalTime: '13:00', departureTime: '13:00' }
         ],
         totalSeats: 160,
-        availableSeats: 154
+        availableSeats: 160
       },
       {
         id: 'trip-004',
@@ -494,178 +494,23 @@ class DatabaseService {
           { stationName: 'Estação Central do Huambo', province: 'Huambo', arrivalTime: '13:00', departureTime: '13:00' }
         ],
         totalSeats: 120,
-        availableSeats: 115
-      }
-    ];
-
-    const initialUsers: User[] = [
-      {
-        id: 'usr-admin-01',
-        name: 'Administrador EKUMBI',
-        email: 'admin@ekumbiexpress.ao',
-        phone: '+244 922 050 257',
-        role: 'admin',
-        biNumber: '000192837LA042',
-        birthDate: '1985-05-14',
-        gender: 'M',
-        nationality: 'Angolana',
-        address: 'Avenida 4 de Fevereiro, Marginal de Luanda',
-        province: 'Luanda',
-        municipality: 'Luanda',
-        locality: 'Ingombota',
-        status: 'activo',
-        createdAt: '2026-01-01T08:00:00Z',
-        lastLoginAt: new Date().toISOString(),
-        loginCount: 48
-      },
-      {
-        id: 'usr-validador-01',
-        name: 'Fiscal de Bordo Kwanza',
-        email: 'fiscal@ekumbiexpress.ao',
-        phone: '+244 923 111 222',
-        role: 'validador',
-        biNumber: '003847291LN038',
-        nationality: 'Angolana',
-        status: 'activo',
-        createdAt: '2026-01-10T08:00:00Z',
-        loginCount: 19
-      },
-      {
-        id: 'usr-cliente-demo',
-        name: 'João Pedro da Silva',
-        email: 'joao.silva@gmail.com',
-        phone: '+244 923 456 789',
-        role: 'cliente',
-        biNumber: '008472918LA042',
-        birthDate: '1992-09-22',
-        gender: 'M',
-        nationality: 'Angolana',
-        address: 'Rua Rainha Ginga, nº 45',
-        province: 'Luanda',
-        municipality: 'Luanda',
-        locality: 'Maianga',
-        status: 'activo',
-        createdAt: '2026-02-15T10:30:00Z',
-        lastLoginAt: new Date().toISOString(),
-        loginCount: 12
-      }
-    ];
-
-    const sampleTicketCode1 = '8492019384';
-    const sampleTicketCode2 = '7291048261';
-
-    const initialBookings: Booking[] = [
-      {
-        id: 'book-sample-01',
-        bookingCode: 'EK-2026-78412',
-        userId: 'usr-cliente-demo',
-        userFullName: 'João Pedro da Silva',
-        userEmail: 'joao.silva@gmail.com',
-        userPhone: '+244 923 456 789',
-        tripId: 'trip-001',
-        tripName: 'EKUMBI Veloz Kwanza 01',
-        originStation: 'Estação Central do Bungo',
-        destinationStation: 'Estação Central de Malanje',
-        travelDate: formatDate(0),
-        departureTime: '06:30',
-        arrivalTime: '13:00',
-        trainName: 'EKUMBI Veloz Kwanza 01',
-        travelClass: 'executiva',
-        passengers: [
-          {
-            id: 'pass-01',
-            fullName: 'João Pedro da Silva',
-            biNumber: '008472918LA042',
-            phone: '+244 923 456 789',
-            email: 'joao.silva@gmail.com',
-            seatNumber: '05',
-            carriageNumber: 2,
-            travelClass: 'executiva',
-            price: 16000
-          }
-        ],
-        totalAmount: 16000,
-        paymentMethod: 'transferencia_bancaria',
-        paymentStatus: 'pagamento_confirmado',
-        paymentReference: 'EK-REF-48190',
-        createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-        expiresAt: new Date(Date.now() + 3600000 * 48).toISOString()
-      }
-    ];
-
-    const initialTickets: Ticket[] = [
-      {
-        id: 'tkt-001',
-        bookingId: 'book-sample-01',
-        passengerId: 'pass-01',
-        numericCode: sampleTicketCode1,
-        qrToken: `EKUMBI:TKT:${sampleTicketCode1}:SEC7841`,
-        passengerName: 'João Pedro da Silva',
-        passengerBi: '008472918LA042',
-        tripId: 'trip-001',
-        trainName: 'EKUMBI Veloz Kwanza 01',
-        originStation: 'Estação Central do Bungo',
-        destinationStation: 'Estação Central de Malanje',
-        travelDate: formatDate(0),
-        departureTime: '06:30',
-        arrivalTime: '13:00',
-        carriageNumber: 2,
-        seatNumber: '05',
-        travelClass: 'executiva',
-        amountPaid: 16000,
-        status: 'valido',
-        issuedAt: new Date(Date.now() - 3600000 * 20).toISOString()
-      }
-    ];
-
-    const initialAuditLogs: AuditLog[] = [
-      {
-        id: 'log-01',
-        adminId: 'usr-admin-01',
-        adminName: 'Administrador EKUMBI',
-        action: 'CONFIRMACAO_PAGAMENTO',
-        targetType: 'pagamento',
-        targetId: 'book-sample-01',
-        details: 'Comprovativo bancário validado com sucesso após verificação do crédito na conta BAI.',
-        timestamp: new Date(Date.now() - 3600000 * 20).toISOString()
-      }
-    ];
-
-    const initialNotifications: SystemNotification[] = [
-      {
-        id: 'notif-01',
-        userId: 'usr-cliente-demo',
-        title: 'Bilhete Emitido com Sucesso!',
-        message: 'O seu bilhete digital para Malanje já está disponível para download em PDF ou imagem.',
-        type: 'sucesso',
-        targetRole: 'cliente',
-        createdAt: new Date(Date.now() - 3600000 * 20).toISOString(),
-        read: false
-      },
-      {
-        id: 'notif-admin-01',
-        title: 'Boas-vindas ao Sistema EKUMBI EXPRESS',
-        message: 'Painel administrativo operacional com controlo de comboios, validação e pagamentos.',
-        type: 'info',
-        targetRole: 'admin',
-        createdAt: new Date().toISOString(),
-        read: false
+        availableSeats: 120
       }
     ];
 
     return {
-      users: initialUsers,
+      users: [],
       stations: INITIAL_STATIONS,
       routes: INITIAL_ROUTES,
       trains: INITIAL_TRAINS,
       trips: initialTrips,
       seats: [],
-      bookings: initialBookings,
+      bookings: [],
       receipts: [],
-      tickets: initialTickets,
+      tickets: [],
       touristDestinations: INITIAL_TOURIST_DESTINATIONS,
-      notifications: initialNotifications,
-      auditLogs: initialAuditLogs
+      notifications: [],
+      auditLogs: []
     };
   }
 
@@ -815,7 +660,7 @@ class DatabaseService {
       pendingPaymentsCount: pendingPayments,
       receiptsInReviewCount: receiptsInReview,
       cancelledTripsCount: this.data.trips.filter(t => t.status === 'cancelada').length,
-      totalConfirmedRevenue: totalRevenue + 5800000, // including baseline historical turnover
+      totalConfirmedRevenue: totalRevenue,
       bookingsByMonth: Object.entries(monthlyMap).map(([month, val]) => ({ month, ...val })),
       popularRoutes,
       popularDestinations,

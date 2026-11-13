@@ -45,6 +45,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -58,6 +59,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     e.preventDefault();
     setLoading(true);
     setErrorMsg(null);
+    setSuccessMsg(null);
 
     try {
       const res = await fetch('/api/auth/login', {
@@ -93,6 +95,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setLoading(true);
     setErrorMsg(null);
+    setSuccessMsg(null);
 
     try {
       const res = await fetch('/api/auth/register', {
@@ -112,8 +115,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
       const data = await res.json();
       if (res.ok) {
-        onSuccess(data.user);
-        onClose();
+        const registeredEmail = data.email || regEmail;
+        setRegName('');
+        setRegEmail('');
+        setRegPhone('+244 9');
+        setRegPassword('');
+        setRegConfirmPassword('');
+        setRegBi('');
+        setRegLocality('');
+        setLoginIdentifier(registeredEmail);
+        setLoginPassword('');
+        setMode('login');
+        setSuccessMsg(
+          data.message || 'Cadastro concluído com sucesso! Faça o login com a sua palavra-passe para aceder à sua conta.'
+        );
       } else {
         setErrorMsg(data.error || 'Erro ao criar conta.');
       }
@@ -157,6 +172,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               onClick={() => {
                 setMode('register');
                 setErrorMsg(null);
+                setSuccessMsg(null);
               }}
               className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
                 mode === 'register' ? 'bg-white text-neutral-900 shadow-sm' : 'text-neutral-300 hover:text-white'
@@ -169,6 +185,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Content Body */}
         <div className="p-6 sm:p-8">
+          {successMsg && (
+            <div className="mb-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <span>{successMsg}</span>
+            </div>
+          )}
+
           {errorMsg && (
             <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
               <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
@@ -241,7 +264,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <span>Não possui conta? </span>
                 <button
                   type="button"
-                  onClick={() => setMode('register')}
+                  onClick={() => {
+                    setMode('register');
+                    setErrorMsg(null);
+                    setSuccessMsg(null);
+                  }}
                   className="font-bold text-red-600 hover:underline"
                 >
                   Criar conta individual

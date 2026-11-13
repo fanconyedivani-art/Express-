@@ -122,3 +122,68 @@ Retorne apenas o JSON puro, sem markdown extra.`;
     rawExtractedText: `MULTICAIXA EXPRESS\nTRANSAÇÃO DE TRANSFERÊNCIA\nBENEFICIÁRIO: EKUMBI EXPRESS S.A.\nCONTA DESTINO: AO06.0040.0000.1234.5678.9012.3\nVALOR: ${expectedAmount.toLocaleString('pt-AO')} Kz\nREF: ${bookingCode}`
   };
 }
+
+export interface BiOcrResult {
+  biNumber: string;
+  fullName: string;
+  address: string;
+  province: string;
+  isReadable: boolean;
+}
+
+export async function extractAngolanBiDocument(imageDataUrl: string): Promise<BiOcrResult> {
+  const ai = getGeminiClient();
+  if (!ai) {
+    throw new Error('Serviço de leitura OCR indisponível (GEMINI_API_KEY não configurada).');
+  }
+
+  const matches = imageDataUrl.match(/^data:([A-Za-z0-9-+\/]+);base64,(.+)$/);
+  if (!matches || matches.length !== 3) {
+    throw new Error('Formato de imagem inválido. Carregue uma fotografia nítida do Bilhete de Identidade.');
+  }
+
+  const prompt = `Você é um sistema oficial de leitura OCR de documentos de identificação civil de Angola (Bilhete de Identidade Nacional).
+Analise a imagem do Bilhete de Identidade (BI) angolano enviada e extraia EXCLUSIVAMENTE os dados reais que estão visíveis e legíveis no documento.
+Nunca invente nomes, números ou moradas que não estejam escritos na imagem.
+
+Retorne estritamente em JSON válido com as chaves:
+{
+  "biNumber": "número do BI exatamente como impresso (ex: 008472918LA042) ou string vazia se ilegível",
+  "fullName": "nome completo exatamente como impresso no BI ou string vazia",
+  "address": "morada/residência impressa no verso do BI (ou naturalidade/província se só a frente foi enviada, se visível) ou string vazia",
+  "province": "província de residência ou emissão visível no documento ou string vazia",
+  "isReadable": true/false
+}`;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-4-hydrogen',
+    contents: {
+      parts: [
+        {
+          inlineData: {
+            mimeType: matches[1],
+            data: matches[2]
+          }
+        },
+        { text: prompt }
+      ]
+    },
+    config: {
+      systemInstruction: 'Extraia apenas texto real visível no Bilhete de Identidade angolano. Nunca fabrique dados. Responda apenas em JSON válido.',
+      responseMimeType: 'application/json'
+    }
+  });
+
+  const text = response.text?.trim() || '';
+  const cleanJson = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  const parsed = JSON.parse(cleanJson);
+
+  return {
+    biNumber: String(parsed.biNumber || '').trim().toUpperCase(),
+    fullName: String(parsed.fullName || '').trim(),
+    address: String(parsed.address || '').trim(),
+    province: String(parsed.province || '').trim(),
+    isReadable: Boolean(parsed.isReadable)
+  };
+}
+

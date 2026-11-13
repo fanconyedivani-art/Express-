@@ -22,7 +22,8 @@ interface HeaderProps {
   currentUser: User | null;
   onOpenAuth: () => void;
   onLogout: () => void;
-  onSwitchRole: (role: 'cliente' | 'admin' | 'validador') => void;
+  onSwitchRole: (role: 'cliente' | 'admin') => void;
+  onOpenPassengerGuest?: () => void;
   notifications: SystemNotification[];
   onOpenNotifications: () => void;
 }
@@ -34,6 +35,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAuth,
   onLogout,
   onSwitchRole,
+  onOpenPassengerGuest,
   notifications,
   onOpenNotifications
 }) => {
@@ -48,19 +50,19 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-neutral-200 transition-all">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-20 gap-4">
+    <header className="sticky top-0 z-50 w-full bg-white/95 backdrop-blur-md border-b border-neutral-200 transition-all">
+      <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16 sm:h-20 gap-2 sm:gap-3 lg:gap-4 min-w-0">
           {/* Brand Zone: 1-line wordmark & logo */}
           <div
             onClick={() => handleNavClick('inicio')}
-            className="cursor-pointer shrink-0"
+            className="cursor-pointer shrink-0 min-w-0"
           >
-            <EkumbiLogo size="md" />
+            <EkumbiLogo size="md" compactMobile={true} />
           </div>
 
-          {/* Nav Links Zone: Clean single-line links */}
-          <nav className="hidden xl:flex items-center gap-7 text-sm font-semibold text-neutral-700">
+          {/* Nav Links Zone: Clean single-line responsive links */}
+          <nav className="hidden xl:flex items-center gap-3.5 2xl:gap-6 text-xs 2xl:text-sm font-semibold text-neutral-700 min-w-0">
             <button
               onClick={() => handleNavClick('inicio')}
               className={`hover:text-red-600 transition-colors whitespace-nowrap cursor-pointer ${
@@ -99,7 +101,8 @@ export const Header: React.FC<HeaderProps> = ({
                 currentTab === 'turismo' ? 'text-red-600 border-b-2 border-red-600 pb-0.5' : ''
               }`}
             >
-              Experiências Turísticas
+              <span className="2xl:hidden">Turismo</span>
+              <span className="hidden 2xl:inline">Experiências Turísticas</span>
             </button>
             <button
               onClick={() => handleNavClick('sobre')}
@@ -121,89 +124,43 @@ export const Header: React.FC<HeaderProps> = ({
             {currentUser?.role === 'admin' && (
               <button
                 onClick={() => handleNavClick('admin')}
-                className={`flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-black text-amber-400 hover:bg-neutral-800 transition-colors whitespace-nowrap cursor-pointer ${
-                  currentTab === 'admin' ? 'ring-2 ring-red-600' : ''
+                className={`flex items-center gap-1.5 text-[11px] 2xl:text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-black text-amber-400 hover:bg-neutral-800 transition-colors whitespace-nowrap cursor-pointer ${
+                  currentTab === 'admin' || currentTab === 'validacao' ? 'ring-2 ring-red-600' : ''
                 }`}
               >
                 <Shield className="w-3.5 h-3.5 text-amber-400" />
                 Painel Admin
               </button>
             )}
-
-            {currentUser?.role === 'validador' && (
-              <button
-                onClick={() => handleNavClick('validacao')}
-                className={`flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-red-700 text-white hover:bg-red-800 transition-colors whitespace-nowrap cursor-pointer ${
-                  currentTab === 'validacao' ? 'ring-2 ring-black' : ''
-                }`}
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                Validador
-              </button>
-            )}
           </nav>
 
           {/* Action Zone: Notifications, Account & Book CTA */}
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 lg:gap-3 shrink-0">
             {/* Real-time Notifications Bell */}
             <button
               onClick={onOpenNotifications}
-              className="relative p-2.5 rounded-xl text-neutral-600 hover:text-red-600 hover:bg-neutral-100 transition-colors"
+              className="relative p-1.5 sm:p-2.5 rounded-xl text-neutral-600 hover:text-red-600 hover:bg-neutral-100 transition-colors cursor-pointer"
               title="Notificações de viagem e do sistema"
             >
-              <Bell className="w-5 h-5" />
+              <Bell className="w-4 h-4 sm:w-5 sm:h-5" />
               {unreadCount > 0 && (
-                <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-red-600 text-white text-[10px] font-black flex items-center justify-center animate-pulse">
+                <span className="absolute top-0.5 right-0.5 sm:top-1.5 sm:right-1.5 w-4 h-4 rounded-full bg-red-600 text-white text-[10px] font-black flex items-center justify-center animate-pulse">
                   {unreadCount}
                 </span>
               )}
             </button>
-
-            {/* Quick Demo Switcher / Role indicator */}
-            <div className="hidden lg:flex items-center bg-neutral-100 p-1 rounded-xl text-xs font-semibold">
-              <button
-                onClick={() => onSwitchRole('cliente')}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
-                  currentUser?.role === 'cliente'
-                    ? 'bg-white text-red-700 shadow-xs font-bold'
-                    : 'text-neutral-500 hover:text-neutral-900'
-                }`}
-              >
-                Passageiro
-              </button>
-              <button
-                onClick={() => onSwitchRole('admin')}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
-                  currentUser?.role === 'admin'
-                    ? 'bg-black text-amber-400 shadow-xs font-bold'
-                    : 'text-neutral-500 hover:text-neutral-900'
-                }`}
-              >
-                Admin
-              </button>
-              <button
-                onClick={() => onSwitchRole('validador')}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
-                  currentUser?.role === 'validador'
-                    ? 'bg-red-700 text-white shadow-xs font-bold'
-                    : 'text-neutral-500 hover:text-neutral-900'
-                }`}
-              >
-                Fiscal
-              </button>
-            </div>
 
             {/* User Account / Login */}
             {currentUser ? (
               <div className="relative">
                 <button
                   onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                  className="flex items-center gap-2 p-1.5 pr-3 rounded-xl border border-neutral-200 hover:border-neutral-300 bg-neutral-50 transition-all text-xs font-semibold text-neutral-800"
+                  className="flex items-center gap-1.5 sm:gap-2 p-1 sm:p-1.5 sm:pr-3 rounded-xl border border-neutral-200 hover:border-neutral-300 bg-neutral-50 transition-all text-xs font-semibold text-neutral-800 cursor-pointer"
                 >
-                  <div className="w-8 h-8 rounded-lg bg-red-600 text-white font-bold flex items-center justify-center">
+                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-red-600 text-white font-bold flex items-center justify-center text-xs">
                     {currentUser.name.charAt(0)}
                   </div>
-                  <span className="hidden sm:inline-block max-w-[110px] truncate">
+                  <span className="hidden md:inline-block max-w-[96px] truncate">
                     {currentUser.name.split(' ')[0]}
                   </span>
                 </button>
@@ -241,29 +198,28 @@ export const Header: React.FC<HeaderProps> = ({
                     </button>
 
                     {currentUser.role === 'admin' && (
-                      <button
-                        onClick={() => {
-                          handleNavClick('admin');
-                          setUserDropdownOpen(false);
-                        }}
-                        className="w-full text-left px-4 py-2 hover:bg-amber-50 text-amber-900 flex items-center gap-2.5 font-semibold"
-                      >
-                        <Shield className="w-4 h-4 text-amber-600" />
-                        Painel Administrativo
-                      </button>
-                    )}
-
-                    {currentUser.role === 'validador' && (
-                      <button
-                        onClick={() => {
-                          handleNavClick('validacao');
-                          setUserDropdownOpen(false);
-                        }}
-                        className="w-full text-left px-4 py-2 hover:bg-red-50 text-red-900 flex items-center gap-2.5 font-semibold"
-                      >
-                        <CheckCircle2 className="w-4 h-4 text-red-600" />
-                        Validar Passagens
-                      </button>
+                      <>
+                        <button
+                          onClick={() => {
+                            handleNavClick('admin');
+                            setUserDropdownOpen(false);
+                          }}
+                          className="w-full text-left px-4 py-2 hover:bg-amber-50 text-amber-900 flex items-center gap-2.5 font-semibold"
+                        >
+                          <Shield className="w-4 h-4 text-amber-600" />
+                          Painel Administrativo
+                        </button>
+                        <button
+                          onClick={() => {
+                            handleNavClick('validacao');
+                            setUserDropdownOpen(false);
+                          }}
+                          className="w-full text-left px-4 py-2 hover:bg-red-50 text-red-900 flex items-center gap-2.5 font-semibold"
+                        >
+                          <CheckCircle2 className="w-4 h-4 text-red-600" />
+                          Fiscalização & Validação
+                        </button>
+                      </>
                     )}
 
                     <div className="border-t border-neutral-100 mt-1 pt-1">
@@ -284,7 +240,7 @@ export const Header: React.FC<HeaderProps> = ({
             ) : (
               <button
                 onClick={onOpenAuth}
-                className="px-4 py-2 text-xs font-bold text-neutral-800 hover:text-red-600 transition-colors whitespace-nowrap"
+                className="px-2 sm:px-3.5 py-1.5 sm:py-2 text-[11px] sm:text-xs font-bold text-neutral-800 hover:text-red-600 transition-colors whitespace-nowrap cursor-pointer"
               >
                 Entrar
               </button>
@@ -293,19 +249,20 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Primary Action Button: RESERVAR VIAGEM */}
             <button
               onClick={() => handleNavClick('reservar')}
-              className="px-5 py-2.5 text-xs font-extrabold uppercase tracking-wider text-white bg-red-600 hover:bg-red-700 active:scale-98 rounded-xl shadow-md shadow-red-600/25 transition-all whitespace-nowrap flex items-center gap-2 cursor-pointer"
+              className="px-2.5 sm:px-4 2xl:px-5 py-1.5 sm:py-2.5 text-[11px] sm:text-xs font-extrabold uppercase tracking-wider text-white bg-red-600 hover:bg-red-700 active:scale-98 rounded-xl shadow-md shadow-red-600/25 transition-all whitespace-nowrap flex items-center gap-1.5 sm:gap-2 cursor-pointer"
             >
-              <Train className="w-4 h-4 text-amber-300" />
-              <span>RESERVAR VIAGEM</span>
+              <Train className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-300 hidden sm:block" />
+              <span className="sm:hidden">Reservar</span>
+              <span className="hidden sm:inline">RESERVAR VIAGEM</span>
             </button>
 
             {/* Mobile Menu Toggle Button */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="xl:hidden p-2.5 rounded-xl text-neutral-700 hover:bg-neutral-100"
+              className="xl:hidden p-1.5 sm:p-2.5 rounded-xl text-neutral-700 hover:bg-neutral-100 cursor-pointer"
               aria-label="Abrir menu de navegação"
             >
-              {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+              {mobileMenuOpen ? <X className="w-5 h-5 sm:w-6 sm:h-6" /> : <Menu className="w-5 h-5 sm:w-6 sm:h-6" />}
             </button>
           </div>
         </div>
@@ -313,81 +270,91 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
-        <div className="xl:hidden border-t border-neutral-200 bg-white px-4 pt-3 pb-6 space-y-2 shadow-2xl">
+        <div className="xl:hidden border-t border-neutral-200 bg-white px-4 pt-3 pb-6 space-y-1.5 shadow-2xl max-h-[calc(100vh-4rem)] overflow-y-auto">
           <button
             onClick={() => handleNavClick('inicio')}
-            className="w-full text-left px-4 py-3 rounded-xl font-semibold text-neutral-800 hover:bg-neutral-50"
+            className={`w-full text-left px-4 py-2.5 rounded-xl font-semibold ${
+              currentTab === 'inicio' ? 'bg-red-50 text-red-600' : 'text-neutral-800 hover:bg-neutral-50'
+            }`}
           >
             Início
           </button>
           <button
             onClick={() => handleNavClick('destinos')}
-            className="w-full text-left px-4 py-3 rounded-xl font-semibold text-neutral-800 hover:bg-neutral-50"
+            className={`w-full text-left px-4 py-2.5 rounded-xl font-semibold ${
+              currentTab === 'destinos' ? 'bg-red-50 text-red-600' : 'text-neutral-800 hover:bg-neutral-50'
+            }`}
           >
             Destinos
           </button>
           <button
             onClick={() => handleNavClick('viagens')}
-            className="w-full text-left px-4 py-3 rounded-xl font-semibold text-neutral-800 hover:bg-neutral-50"
+            className={`w-full text-left px-4 py-2.5 rounded-xl font-semibold ${
+              currentTab === 'viagens' ? 'bg-red-50 text-red-600' : 'text-neutral-800 hover:bg-neutral-50'
+            }`}
           >
             Viagens e Horários
           </button>
           <button
             onClick={() => handleNavClick('bilhetes')}
-            className="w-full text-left px-4 py-3 rounded-xl font-semibold text-neutral-800 hover:bg-neutral-50"
+            className={`w-full text-left px-4 py-2.5 rounded-xl font-semibold ${
+              currentTab === 'bilhetes' ? 'bg-red-50 text-red-600' : 'text-neutral-800 hover:bg-neutral-50'
+            }`}
           >
             Bilhetes
           </button>
           <button
             onClick={() => handleNavClick('turismo')}
-            className="w-full text-left px-4 py-3 rounded-xl font-semibold text-neutral-800 hover:bg-neutral-50"
+            className={`w-full text-left px-4 py-2.5 rounded-xl font-semibold ${
+              currentTab === 'turismo' ? 'bg-red-50 text-red-600' : 'text-neutral-800 hover:bg-neutral-50'
+            }`}
           >
             Experiências Turísticas
           </button>
           <button
             onClick={() => handleNavClick('sobre')}
-            className="w-full text-left px-4 py-3 rounded-xl font-semibold text-neutral-800 hover:bg-neutral-50"
+            className={`w-full text-left px-4 py-2.5 rounded-xl font-semibold ${
+              currentTab === 'sobre' ? 'bg-red-50 text-red-600' : 'text-neutral-800 hover:bg-neutral-50'
+            }`}
           >
             Sobre Nós
           </button>
           <button
             onClick={() => handleNavClick('contactos')}
-            className="w-full text-left px-4 py-3 rounded-xl font-semibold text-neutral-800 hover:bg-neutral-50"
+            className={`w-full text-left px-4 py-2.5 rounded-xl font-semibold ${
+              currentTab === 'contactos' ? 'bg-red-50 text-red-600' : 'text-neutral-800 hover:bg-neutral-50'
+            }`}
           >
             Contactos
           </button>
+
+          {currentUser?.role === 'admin' && (
+            <button
+              onClick={() => handleNavClick('admin')}
+              className="w-full text-left px-4 py-2.5 rounded-xl font-bold bg-black text-amber-400 flex items-center gap-2"
+            >
+              <Shield className="w-4 h-4 text-amber-400" />
+              <span>Painel Admin & Fiscal</span>
+            </button>
+          )}
 
           <div className="pt-2 border-t border-neutral-100">
             <p className="text-xs font-bold text-neutral-400 px-4 mb-2 uppercase tracking-wider">
               Alternar Modo de Demonstração
             </p>
-            <div className="grid grid-cols-3 gap-2 px-2">
+            <div className="grid grid-cols-1 gap-2 px-2">
               <button
                 onClick={() => {
-                  onSwitchRole('cliente');
+                  if (onOpenPassengerGuest) {
+                    onOpenPassengerGuest();
+                  } else {
+                    onSwitchRole('cliente');
+                  }
                   setMobileMenuOpen(false);
                 }}
-                className={`py-2 text-center text-xs font-bold rounded-lg ${currentUser?.role === 'cliente' ? 'bg-red-600 text-white' : 'bg-neutral-100 text-neutral-700'}`}
+                className={`py-2 text-center text-xs font-bold rounded-lg ${!currentUser || currentUser?.role === 'cliente' ? 'bg-red-600 text-white' : 'bg-neutral-100 text-neutral-700'}`}
               >
                 Passageiro
-              </button>
-              <button
-                onClick={() => {
-                  onSwitchRole('admin');
-                  setMobileMenuOpen(false);
-                }}
-                className={`py-2 text-center text-xs font-bold rounded-lg ${currentUser?.role === 'admin' ? 'bg-black text-amber-400' : 'bg-neutral-100 text-neutral-700'}`}
-              >
-                Admin
-              </button>
-              <button
-                onClick={() => {
-                  onSwitchRole('validador');
-                  setMobileMenuOpen(false);
-                }}
-                className={`py-2 text-center text-xs font-bold rounded-lg ${currentUser?.role === 'validador' ? 'bg-red-700 text-white' : 'bg-neutral-100 text-neutral-700'}`}
-              >
-                Fiscal
               </button>
             </div>
           </div>

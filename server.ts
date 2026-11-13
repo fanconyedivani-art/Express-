@@ -23,8 +23,8 @@ const PORT = 3000;
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
-// Memory session cache (for simplicity without external cookie dependencies)
-let currentUserSession: User = dbService.getDb().users.find(u => u.role === 'admin') || dbService.getDb().users[0];
+// Memory session cache (null = guest passenger without login)
+let currentUserSession: User | null = null;
 
 // Logging store for simulated SMS and WhatsApp dispatches
 export interface OutgoingCommunication {
@@ -95,11 +95,12 @@ app.post('/api/auth/register', (req, res) => {
     return res.status(400).json({ error: 'Já existe uma conta associada a este endereço de e-mail.' });
   }
 
-  const newUser: User = {
+  const newUser: User & { password?: string } = {
     id: `usr-${Date.now()}`,
     name,
     email,
     phone,
+    password,
     role: 'cliente',
     biNumber: biNumber || '',
     birthDate: birthDate || '',
@@ -114,8 +115,7 @@ app.post('/api/auth/register', (req, res) => {
     locationPermission: !!locationPermission,
     status: 'activo',
     createdAt: new Date().toISOString(),
-    lastLoginAt: new Date().toISOString(),
-    loginCount: 1
+    loginCount: 0
   };
 
   db.users.push(newUser);
@@ -125,7 +125,7 @@ app.post('/api/auth/register', (req, res) => {
     id: `notif-${Date.now()}`,
     userId: newUser.id,
     title: 'Bem-vindo ao EKUMBI EXPRESS!',
-    message: `Olá ${newUser.name}, a sua conta foi criada com sucesso. Descubra os nossos destinos e reserve a sua próxima viagem.`,
+    message: `Olá ${newUser.name}, a sua conta foi criada com sucesso. Faça login para reservar a sua próxima viagem.`,
     type: 'sucesso',
     targetRole: 'cliente',
     createdAt: new Date().toISOString(),
@@ -133,21 +133,111 @@ app.post('/api/auth/register', (req, res) => {
   });
 
   dbService.commit();
-  currentUserSession = newUser;
-  res.json({ user: newUser, message: 'Conta criada com sucesso!' });
+  currentUserSession = null;
+  res.json({
+    requiresLogin: true,
+    email: newUser.email,
+    message: 'Cadastro realizado com sucesso! Agora faça o login para continuar.'
+  });
+});
+
+const ADMIN_REGISTRATION_CODE = 'EXPRESS-ANGOLA2026';
+
+app.post('/api/auth/verify-admin-code', (req, res) => {
+  const { code } = req.body;
+  if (!code || String(code).trim() !== ADMIN_REGISTRATION_CODE) {
+    return res.status(403).json({
+      valid: false,
+      error: 'Código de autorização inválido. Acesso negado ao cadastro de administrador.'
+    });
+  }
+  res.json({ valid: true, message: 'Código verificado com sucesso.' });
+});
+
+app.post('/api/auth/register-admin', (req, res) => {
+  const {
+    accessCode,
+    name,
+    email,
+    phone,
+    password,
+    biNumber,
+    province
+  } = req.body;
+
+  if (!accessCode || String(accessCode).trim() !== ADMIN_REGISTRATION_CODE) {
+    return res.status(403).json({
+      error: 'Código de autorização inválido. Acesso negado ao cadastro de administrador.'
+    });
+  }
+
+  if (!name || !email || !phone || !password) {
+    return res.status(400).json({ error: 'Nome, e-mail, telefone e palavra-passe são obrigatórios.' });
+  }
+
+  const db = dbService.getDb();
+  const existing = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+  if (existing) {
+    return res.status(400).json({ error: 'Já existe uma conta associada a este endereço de e-mail.' });
+  }
+
+  const newAdmin: User & { password?: string } = {
+    id: `adm-${Date.now()}`,
+    name,
+    email,
+    phone,
+    password,
+    role: 'admin',
+    biNumber: biNumber || '',
+    nationality: 'Angolana',
+    province: province || 'Luanda',
+    municipality: 'Luanda',
+    status: 'activo',
+    createdAt: new Date().toISOString(),
+    lastLoginAt: new Date().toISOString(),
+    loginCount: 1
+  };
+
+  db.users.push(newAdmin);
+
+  db.auditLogs.unshift({
+    id: `log-${Date.now()}`,
+    adminId: newAdmin.id,
+    adminName: newAdmin.name,
+    action: 'CADASTRO_ADMINISTRADOR',
+    targetType: 'cliente',
+    targetId: newAdmin.id,
+    details: `Novo administrador registado: ${newAdmin.name} (${newAdmin.email}).`,
+    timestamp: new Date().toISOString()
+  });
+
+  db.notifications.unshift({
+    id: `notif-${Date.now()}`,
+    userId: newAdmin.id,
+    title: 'Conta de Administrador Activada',
+    message: `Bem-vindo(a), ${newAdmin.name}. O seu acesso administrativo à EKUMBI EXPRESS está ativo.`,
+    type: 'sucesso',
+    targetRole: 'admin',
+    createdAt: new Date().toISOString(),
+    read: false
+  });
+
+  dbService.commit();
+  currentUserSession = newAdmin;
+  res.json({ user: newAdmin, message: 'Administrador cadastrado com sucesso!' });
 });
 
 app.post('/api/auth/login', (req, res) => {
   const { identifier, password } = req.body; // email or phone
-  if (!identifier) {
-    return res.status(400).json({ error: 'Informe o seu e-mail ou número de telefone.' });
+  if (!identifier || !password) {
+    return res.status(400).json({ error: 'Informe o seu e-mail/telefone e palavra-passe.' });
   }
 
   const db = dbService.getDb();
   const cleanId = identifier.trim().toLowerCase();
   const user = db.users.find(
     u => (u.email.toLowerCase() === cleanId || u.phone.replace(/\s+/g, '') === cleanId.replace(/\s+/g, ''))
-  );
+  ) as (User & { password?: string }) | undefined;
 
   if (!user) {
     return res.status(401).json({ error: 'Credenciais inválidas. Verifique o seu e-mail/telefone e palavra-passe.' });
@@ -157,16 +247,73 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(403).json({ error: 'Esta conta está temporariamente suspensa pela administração.' });
   }
 
+  if (user.password && user.password !== password) {
+    return res.status(401).json({ error: 'Palavra-passe incorreta. Verifique e tente novamente.' });
+  }
+
   user.lastLoginAt = new Date().toISOString();
   user.loginCount = (user.loginCount || 0) + 1;
   dbService.commit();
 
+  const { password: _pwd, ...safeUser } = user;
+  currentUserSession = safeUser;
+  res.json({ user: safeUser, message: 'Sessão iniciada com sucesso!' });
+});
+
+app.post('/api/auth/login-admin', (req, res) => {
+  const { identifier, password } = req.body;
+  if (!identifier || !password) {
+    return res.status(400).json({ error: 'Informe o e-mail/telefone e a palavra-passe.' });
+  }
+
+  const db = dbService.getDb();
+  const cleanId = String(identifier).trim().toLowerCase();
+  const user = db.users.find(
+    u => u.email.toLowerCase() === cleanId || u.phone.replace(/\s+/g, '') === cleanId.replace(/\s+/g, '')
+  ) as (User & { password?: string }) | undefined;
+
+  if (!user) {
+    return res.status(401).json({ error: 'Administrador não encontrado. Verifique as credenciais.' });
+  }
+
+  if (user.role !== 'admin') {
+    return res.status(403).json({ error: 'Esta conta não possui privilégios de administrador.' });
+  }
+
+  if (user.status === 'suspenso') {
+    return res.status(403).json({ error: 'Esta conta administrativa está temporariamente suspensa.' });
+  }
+
+  if (user.password && user.password !== password) {
+    return res.status(401).json({ error: 'Palavra-passe incorreta.' });
+  }
+
+  user.lastLoginAt = new Date().toISOString();
+  user.loginCount = (user.loginCount || 0) + 1;
+
+  db.auditLogs.unshift({
+    id: `log-${Date.now()}`,
+    adminId: user.id,
+    adminName: user.name,
+    action: 'LOGIN_ADMINISTRADOR',
+    targetType: 'cliente',
+    targetId: user.id,
+    details: `Sessão administrativa iniciada por ${user.name} (${user.email}).`,
+    timestamp: new Date().toISOString()
+  });
+
+  dbService.commit();
   currentUserSession = user;
-  res.json({ user, message: 'Sessão iniciada com sucesso!' });
+  res.json({ user, message: 'Sessão de administrador iniciada com sucesso!' });
 });
 
 app.get('/api/auth/me', (req, res) => {
   res.json({ user: currentUserSession });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  currentUserSession = null;
+  res.json({ user: null, message: 'Sessão encerrada.' });
 });
 
 app.post('/api/auth/switch-user', (req, res) => {
@@ -176,13 +323,228 @@ app.post('/api/auth/switch-user', (req, res) => {
   if (!target) {
     target = db.users[0];
   }
-  currentUserSession = target;
+  currentUserSession = target || null;
   res.json({ user: currentUserSession });
 });
 
-app.put('/api/auth/profile', (req, res) => {
+// ----------------------------------------------------
+// PASSENGER BI LOOKUP & QUICK REGISTRATION
+// ----------------------------------------------------
+
+const ANGOLA_BI_PROVINCES: Record<string, string> = {
+  LA: 'Luanda',
+  BG: 'Benguela',
+  MJ: 'Malanje',
+  HB: 'Huambo',
+  HL: 'Huíla',
+  CN: 'Cuanza Norte',
+  CS: 'Cuanza Sul',
+  NB: 'Namibe',
+  CB: 'Cabinda',
+  UG: 'Uíge',
+  ZR: 'Zaire',
+  BO: 'Bengo',
+  BI: 'Bié',
+  MX: 'Moxico',
+  CC: 'Cuando Cubango',
+  CU: 'Cunene',
+  LN: 'Lunda Norte',
+  LS: 'Lunda Sul'
+};
+
+app.get('/api/passengers/lookup-bi/:biNumber', async (req, res) => {
+  const bi = decodeURIComponent(req.params.biNumber || '').trim().toUpperCase();
+  if (!bi || bi.length < 6) {
+    return res.json({ found: false, validFormat: false });
+  }
+
+  // 1. Query institutional Angola BI / KYC API if configured in environment
+  const biApiUrl = process.env.ANGOLA_BI_API_URL?.trim();
+  const biApiToken = process.env.ANGOLA_BI_API_TOKEN?.trim();
+  if (biApiUrl) {
+    try {
+      const endpoint = `${biApiUrl.replace(/\/+$/, '')}/${encodeURIComponent(bi)}`;
+      const apiRes = await fetch(endpoint, {
+        headers: biApiToken ? { Authorization: `Bearer ${biApiToken}` } : undefined
+      });
+      if (apiRes.ok) {
+        const external: any = await apiRes.json();
+        const extName = external.name || external.fullName || external.nome_completo || external.nome;
+        const extAddress = external.address || external.morada || external.residencia || '';
+        if (extName) {
+          return res.json({
+            found: true,
+            validFormat: true,
+            source: 'official_api',
+            name: String(extName),
+            address: String(extAddress),
+            currentLocation: String(external.currentLocation || external.locality || external.localidade || external.province || external.provincia || ''),
+            province: String(external.province || external.provincia || ''),
+            phone: String(external.phone || external.telefone || ''),
+            email: String(external.email || '')
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('Erro ao consultar API institucional de BI:', err);
+    }
+  }
+
   const db = dbService.getDb();
-  const user = db.users.find(u => u.id === currentUserSession.id);
+
+  // 2. Check real registered users in DB
+  const matchedUser = db.users.find(u => u.biNumber && u.biNumber.trim().toUpperCase() === bi);
+  if (matchedUser) {
+    const locParts = [matchedUser.locality, matchedUser.municipality, matchedUser.province].filter(Boolean);
+    const uniqueLoc = Array.from(new Set(locParts)).join(', ');
+    return res.json({
+      found: true,
+      validFormat: true,
+      source: 'database',
+      name: matchedUser.name,
+      address: matchedUser.address || '',
+      currentLocation: uniqueLoc,
+      province: matchedUser.province || '',
+      phone: matchedUser.phone || '',
+      email: matchedUser.email || ''
+    });
+  }
+
+  // 3. Check real previous bookings passengers in DB
+  for (const booking of db.bookings) {
+    const pass = booking.passengers.find(p => p.biNumber && p.biNumber.trim().toUpperCase() === bi);
+    if (pass) {
+      return res.json({
+        found: true,
+        validFormat: true,
+        source: 'database',
+        name: pass.fullName,
+        address: '',
+        currentLocation: '',
+        province: '',
+        phone: pass.phone || '',
+        email: pass.email || ''
+      });
+    }
+  }
+
+  // 4. Validate real Angolan BI format & issuing province without fabricating personal data
+  const biMatch = bi.match(/^(\d{9})([A-Z]{2})(\d{3})$/);
+  if (biMatch) {
+    const provCode = biMatch[2];
+    const province = ANGOLA_BI_PROVINCES[provCode] || '';
+    return res.json({
+      found: false,
+      validFormat: Boolean(province),
+      province
+    });
+  }
+
+  return res.json({ found: false, validFormat: false });
+});
+
+app.post('/api/passengers/register', (req, res) => {
+  const {
+    biNumber,
+    name,
+    address,
+    currentLocation,
+    latitude,
+    longitude,
+    phone,
+    email
+  } = req.body;
+
+  if (!biNumber || !name || !address || !phone || !email) {
+    return res.status(400).json({
+      error: 'Preencha todos os campos obrigatórios: BI, Nome, Morada, Telefone e E-mail.'
+    });
+  }
+
+  const db = dbService.getDb();
+  const normalizedBi = String(biNumber).trim().toUpperCase();
+  const normalizedEmail = String(email).trim().toLowerCase();
+
+  const existing = db.users.find(
+    u =>
+      (u.email && u.email.toLowerCase() === normalizedEmail) ||
+      (u.biNumber && u.biNumber.trim().toUpperCase() === normalizedBi)
+  );
+
+  if (existing && existing.role !== 'cliente') {
+    return res.status(400).json({
+      error: 'Este e-mail ou BI já está associado a uma conta de equipa. Utilize outros dados de passageiro.'
+    });
+  }
+
+  if (existing) {
+    existing.name = name.trim();
+    existing.biNumber = normalizedBi;
+    existing.address = address.trim();
+    existing.phone = phone.trim();
+    existing.email = email.trim();
+    if (currentLocation) existing.locality = String(currentLocation).trim();
+    if (latitude !== undefined) existing.latitude = latitude;
+    if (longitude !== undefined) existing.longitude = longitude;
+    existing.locationPermission = !!(latitude && longitude);
+    existing.lastLoginAt = new Date().toISOString();
+    existing.loginCount = (existing.loginCount || 0) + 1;
+
+    dbService.commit();
+    currentUserSession = existing;
+    return res.json({
+      user: existing,
+      message: 'Cadastro de passageiro atualizado com sucesso!'
+    });
+  }
+
+  const newPassenger: User = {
+    id: `usr-${Date.now()}`,
+    name: name.trim(),
+    email: email.trim(),
+    phone: phone.trim(),
+    role: 'cliente',
+    biNumber: normalizedBi,
+    nationality: 'Angolana',
+    address: address.trim(),
+    province: 'Luanda',
+    municipality: 'Luanda',
+    locality: currentLocation ? String(currentLocation).trim() : '',
+    latitude: latitude || undefined,
+    longitude: longitude || undefined,
+    locationPermission: !!(latitude && longitude),
+    status: 'activo',
+    createdAt: new Date().toISOString(),
+    lastLoginAt: new Date().toISOString(),
+    loginCount: 1
+  };
+
+  db.users.push(newPassenger);
+  db.notifications.unshift({
+    id: `notif-${Date.now()}`,
+    userId: newPassenger.id,
+    title: 'Passageiro Cadastrado com Sucesso!',
+    message: `Olá ${newPassenger.name}, o seu cadastro ferroviário com BI ${newPassenger.biNumber} foi concluído.`,
+    type: 'sucesso',
+    targetRole: 'cliente',
+    createdAt: new Date().toISOString(),
+    read: false
+  });
+
+  dbService.commit();
+  currentUserSession = newPassenger;
+  res.json({
+    user: newPassenger,
+    message: 'Passageiro cadastrado com sucesso!'
+  });
+});
+
+app.put('/api/auth/profile', (req, res) => {
+  if (!currentUserSession) {
+    return res.status(401).json({ error: 'Inicie sessão ou cadastre-se como passageiro para atualizar o perfil.' });
+  }
+  const db = dbService.getDb();
+  const user = db.users.find(u => u.id === currentUserSession!.id);
   if (!user) {
     return res.status(404).json({ error: 'Utilizador não encontrado.' });
   }
@@ -302,8 +664,41 @@ app.delete('/api/trips/:id', (req, res) => {
   const trip = db.trips.find(t => t.id === req.params.id);
   if (!trip) return res.status(404).json({ error: 'Viagem não encontrada.' });
   trip.status = 'cancelada';
+
+  // Notify affected confirmed passengers in real time
+  const affectedBookings = db.bookings.filter(
+    b => b.tripId === trip.id && (b.paymentStatus === 'pagamento_confirmado' || b.paymentStatus === 'comprovativo_recebido')
+  );
+  for (const booking of affectedBookings) {
+    const msg = `A sua viagem ${trip.trainName} (${trip.originStation} ➔ ${trip.destinationStation}) prevista para ${trip.departureDate} às ${trip.departureTime} foi cancelada pela administração. Aceda à sua conta para solicitar reembolso ou reagendamento.`;
+    db.notifications.unshift({
+      id: `notif-cancel-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      userId: booking.userId,
+      title: `Viagem Cancelada: ${trip.trainName}`,
+      message: msg,
+      type: 'urgente',
+      targetRole: 'cliente',
+      createdAt: new Date().toISOString(),
+      read: false,
+      actionUrl: `/minha-conta?tab=viagens`
+    });
+    dispatchAlert('email', booking.userEmail, msg, `[EKUMBI EXPRESS] Cancelamento da Viagem ${trip.trainName}`, { bookingCode: booking.bookingCode, tripId: trip.id });
+    dispatchAlert('sms', booking.userPhone, `[EKUMBI EXPRESS] Viagem Cancelada: ${trip.trainName} (${trip.departureDate}). Consulte a sua conta para reembolso.`, undefined, { bookingCode: booking.bookingCode, tripId: trip.id });
+  }
+
+  db.auditLogs.unshift({
+    id: `log-${Date.now()}`,
+    adminId: currentUserSession?.id || 'admin',
+    adminName: currentUserSession?.name || 'Administração EKUMBI',
+    action: 'CANCELAMENTO_VIAGEM',
+    targetType: 'viagem',
+    targetId: trip.id,
+    details: `Viagem ${trip.trainName} (${trip.departureDate}) cancelada. ${affectedBookings.length} passageiros notificados.`,
+    timestamp: new Date().toISOString()
+  });
+
   dbService.commit();
-  res.json({ message: 'Viagem cancelada com sucesso.' });
+  res.json({ message: 'Viagem cancelada com sucesso e passageiros notificados.' });
 });
 
 // ----------------------------------------------------
@@ -402,8 +797,8 @@ app.post('/api/trips/:id/operational-alert', (req, res) => {
   // Audit log
   db.auditLogs.unshift({
     id: `log-${Date.now()}`,
-    adminId: currentUserSession.id,
-    adminName: currentUserSession.name,
+    adminId: currentUserSession?.id || 'admin',
+    adminName: currentUserSession?.name || 'Administração EKUMBI',
     action: 'DISPARO_ALERTA_VIAGEM',
     targetType: 'viagem',
     targetId: trip.id,
@@ -435,6 +830,12 @@ app.get('/api/trips/:id/seats', (req, res) => {
 // ----------------------------------------------------
 
 app.post('/api/bookings', (req, res) => {
+  if (!currentUserSession) {
+    return res.status(401).json({
+      error: 'Apenas passageiros cadastrados podem reservar viagens e comprar bilhetes.'
+    });
+  }
+
   const {
     tripId,
     travelClass,
@@ -451,13 +852,19 @@ app.post('/api/bookings', (req, res) => {
   const bookingCode = generateBookingCode();
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15-minute temporary hold
 
+  const primaryPassenger = passengers[0] || {};
+  const guestUserId = currentUserSession?.id || `guest-${Date.now()}`;
+  const bookingName = currentUserSession?.name || primaryPassenger.fullName || 'Passageiro EKUMBI';
+  const bookingEmail = currentUserSession?.email || primaryPassenger.email || 'passageiro@ekumbi.ao';
+  const bookingPhone = currentUserSession?.phone || primaryPassenger.phone || '+244 900 000 000';
+
   const newBooking: Booking = {
     id: `book-${Date.now()}`,
     bookingCode,
-    userId: currentUserSession.id,
-    userFullName: currentUserSession.name,
-    userEmail: currentUserSession.email,
-    userPhone: currentUserSession.phone,
+    userId: guestUserId,
+    userFullName: bookingName,
+    userEmail: bookingEmail,
+    userPhone: bookingPhone,
     tripId: trip.id,
     tripName: trip.trainName,
     originStation: trip.originStation,
@@ -469,10 +876,10 @@ app.post('/api/bookings', (req, res) => {
     travelClass,
     passengers: passengers.map((p: any, idx: number) => ({
       id: `pass-${Date.now()}-${idx}`,
-      fullName: p.fullName || currentUserSession.name,
-      biNumber: p.biNumber || currentUserSession.biNumber || '000000000LA000',
-      phone: p.phone || currentUserSession.phone,
-      email: p.email || currentUserSession.email,
+      fullName: p.fullName || bookingName,
+      biNumber: p.biNumber || currentUserSession?.biNumber || '000000000LA000',
+      phone: p.phone || bookingPhone,
+      email: p.email || bookingEmail,
       seatNumber: p.seatNumber,
       carriageNumber: p.carriageNumber,
       travelClass,
@@ -490,7 +897,7 @@ app.post('/api/bookings', (req, res) => {
   // In-app notification for booking creation
   db.notifications.unshift({
     id: `notif-${Date.now()}`,
-    userId: currentUserSession.id,
+    userId: guestUserId,
     title: 'Reserva Efetuada com Sucesso!',
     message: `A sua reserva ${bookingCode} para ${trip.destinationStation} foi registada. Efetue o pagamento em até 15 minutos para garantir o seu assento.`,
     type: 'info',
@@ -505,8 +912,11 @@ app.post('/api/bookings', (req, res) => {
 });
 
 app.get('/api/bookings/my', (req, res) => {
+  if (!currentUserSession) {
+    return res.json([]);
+  }
   const db = dbService.getDb();
-  const bookings = db.bookings.filter(b => b.userId === currentUserSession.id);
+  const bookings = db.bookings.filter(b => b.userId === currentUserSession!.id);
   res.json(bookings);
 });
 
@@ -548,6 +958,11 @@ app.post('/api/bookings/:id/cancel-request', (req, res) => {
 
 // Process direct credit/debit card payment
 app.post('/api/payments/card', (req, res) => {
+  if (!currentUserSession) {
+    return res.status(401).json({
+      error: 'Apenas passageiros cadastrados podem comprar bilhetes.'
+    });
+  }
   const { bookingId, cardHolder, last4, expDate } = req.body;
   const db = dbService.getDb();
   const booking = db.bookings.find(b => b.id === bookingId);
@@ -620,6 +1035,11 @@ app.post('/api/payments/card', (req, res) => {
 
 // Upload bank deposit/transfer receipt with AI OCR and WhatsApp notification
 app.post('/api/payments/receipt', async (req, res) => {
+  if (!currentUserSession) {
+    return res.status(401).json({
+      error: 'Apenas passageiros cadastrados podem efetuar pagamentos e comprar bilhetes.'
+    });
+  }
   const { bookingId, fileName, fileData, fileSize, mimeType } = req.body;
   const db = dbService.getDb();
   const booking = db.bookings.find(b => b.id === bookingId);
@@ -724,6 +1144,14 @@ app.post('/api/payments/:bookingId/approve', (req, res) => {
 
   booking.paymentStatus = 'pagamento_confirmado';
 
+  // Update receipt if present
+  const receipt = db.receipts.find(r => r.bookingId === booking.id);
+  if (receipt) {
+    receipt.status = 'pagamento_confirmado';
+    receipt.reviewedByAdminId = currentUserSession?.id || 'admin';
+    receipt.reviewedAt = new Date().toISOString();
+  }
+
   // Issue digital tickets
   const issuedTickets: Ticket[] = [];
   for (const passenger of booking.passengers) {
@@ -760,27 +1188,31 @@ app.post('/api/payments/:bookingId/approve', (req, res) => {
   // Audit log
   db.auditLogs.unshift({
     id: `log-${Date.now()}`,
-    adminId: currentUserSession.id,
-    adminName: currentUserSession.name,
+    adminId: currentUserSession?.id || 'admin',
+    adminName: currentUserSession?.name || 'Administração EKUMBI',
     action: 'APROVACAO_COMPROVATIVO',
     targetType: 'pagamento',
     targetId: booking.id,
-    details: `Pagamento validado pelo administrador ${currentUserSession.name}. ${issuedTickets.length} bilhetes emitidos.`,
+    details: `Pagamento validado pelo administrador ${currentUserSession?.name || 'Administração EKUMBI'}. ${issuedTickets.length} bilhetes emitidos.`,
     timestamp: new Date().toISOString()
   });
 
-  // Client notification
+  // Client notification (In-App + Email + SMS)
+  const confirmMsg = `A sua transferência para a reserva ${booking.bookingCode} foi validada. O bilhete está pronto para descarregar em PDF ou imagem.`;
   db.notifications.unshift({
     id: `notif-${Date.now()}`,
     userId: booking.userId,
     title: 'Pagamento Aprovado e Bilhete Emitido!',
-    message: `A sua transferência para a reserva ${booking.bookingCode} foi validada. O bilhete está pronto para descarregar em PDF ou imagem.`,
+    message: confirmMsg,
     type: 'sucesso',
     targetRole: 'cliente',
     createdAt: new Date().toISOString(),
     read: false,
     actionUrl: `/minha-conta?tab=bilhetes`
   });
+
+  dispatchAlert('email', booking.userEmail, confirmMsg, `[EKUMBI EXPRESS] Bilhete Emitido - Reserva ${booking.bookingCode}`, { bookingCode: booking.bookingCode });
+  dispatchAlert('sms', booking.userPhone, `[EKUMBI EXPRESS] Pagamento confirmado para reserva ${booking.bookingCode}. O seu bilhete já está disponível na sua conta.`, undefined, { bookingCode: booking.bookingCode });
 
   dbService.commit();
   res.json({ success: true, booking, tickets: issuedTickets });
@@ -795,11 +1227,19 @@ app.post('/api/payments/:bookingId/reject', (req, res) => {
 
   booking.paymentStatus = 'pagamento_rejeitado';
 
+  const receipt = db.receipts.find(r => r.bookingId === booking.id);
+  if (receipt) {
+    receipt.status = 'pagamento_rejeitado';
+    receipt.reviewedByAdminId = currentUserSession?.id || 'admin';
+    receipt.reviewedAt = new Date().toISOString();
+    receipt.rejectionReason = reason || 'Comprovativo não reconhecido ou valor divergente.';
+  }
+
   // Audit log
   db.auditLogs.unshift({
     id: `log-${Date.now()}`,
-    adminId: currentUserSession.id,
-    adminName: currentUserSession.name,
+    adminId: currentUserSession?.id || 'admin',
+    adminName: currentUserSession?.name || 'Administração EKUMBI',
     action: 'REJEICAO_PAGAMENTO',
     targetType: 'pagamento',
     targetId: booking.id,
@@ -807,18 +1247,22 @@ app.post('/api/payments/:bookingId/reject', (req, res) => {
     timestamp: new Date().toISOString()
   });
 
-  // Client notification
+  // Client notification (In-App + Email + SMS)
+  const rejectMsg = `O comprovativo da reserva ${booking.bookingCode} foi rejeitado. Motivo: ${reason || 'Valor não localizado no extracto bancário.'}. Por favor tente novamente.`;
   db.notifications.unshift({
     id: `notif-${Date.now()}`,
     userId: booking.userId,
     title: 'Comprovativo Rejeitado',
-    message: `O comprovativo da reserva ${booking.bookingCode} foi rejeitado. Motivo: ${reason || 'Valor não localizado no extracto bancário.'}. Por favor tente novamente.`,
+    message: rejectMsg,
     type: 'aviso',
     targetRole: 'cliente',
     createdAt: new Date().toISOString(),
     read: false,
     actionUrl: `/pagamento/${booking.id}`
   });
+
+  dispatchAlert('email', booking.userEmail, rejectMsg, `[EKUMBI EXPRESS] Comprovativo Rejeitado - Reserva ${booking.bookingCode}`, { bookingCode: booking.bookingCode });
+  dispatchAlert('sms', booking.userPhone, `[EKUMBI EXPRESS] Comprovativo rejeitado para reserva ${booking.bookingCode}. Motivo: ${reason || 'Verifique na sua conta'}.`, undefined, { bookingCode: booking.bookingCode });
 
   dbService.commit();
   res.json({ success: true, booking });
@@ -829,8 +1273,11 @@ app.post('/api/payments/:bookingId/reject', (req, res) => {
 // ----------------------------------------------------
 
 app.get('/api/tickets/my', (req, res) => {
+  if (!currentUserSession) {
+    return res.json([]);
+  }
   const db = dbService.getDb();
-  const userBookings = db.bookings.filter(b => b.userId === currentUserSession.id).map(b => b.id);
+  const userBookings = db.bookings.filter(b => b.userId === currentUserSession!.id).map(b => b.id);
   const tickets = db.tickets.filter(t => userBookings.includes(t.bookingId));
   res.json(tickets);
 });
@@ -892,13 +1339,13 @@ app.post('/api/tickets/validate', (req, res) => {
   // ATOMIC VALIDATION: Mark as used
   ticket.status = 'utilizado';
   ticket.usedAt = new Date().toISOString();
-  ticket.validatedBy = currentUserSession.name;
+  ticket.validatedBy = currentUserSession?.name || 'Administrador EKUMBI';
 
   // Log validation in audit
   db.auditLogs.unshift({
     id: `log-${Date.now()}`,
-    adminId: currentUserSession.id,
-    adminName: currentUserSession.name,
+    adminId: currentUserSession?.id || 'admin',
+    adminName: currentUserSession?.name || 'Administrador EKUMBI',
     action: 'VALIDACAO_EMBARQUE',
     targetType: 'bilhete',
     targetId: ticket.id,
@@ -923,9 +1370,11 @@ app.post('/api/tickets/validate', (req, res) => {
 
 app.get('/api/notifications/my', (req, res) => {
   const db = dbService.getDb();
-  const notifs = db.notifications.filter(
-    n => !n.userId || n.userId === currentUserSession.id || (n.targetRole && n.targetRole === currentUserSession.role)
-  );
+  const notifs = currentUserSession
+    ? db.notifications.filter(
+        n => !n.userId || n.userId === currentUserSession!.id || (n.targetRole && n.targetRole === currentUserSession!.role)
+      )
+    : db.notifications.filter(n => !n.userId && (!n.targetRole || n.targetRole === 'cliente'));
   res.json(notifs);
 });
 
@@ -933,6 +1382,20 @@ app.post('/api/notifications/:id/read', (req, res) => {
   const db = dbService.getDb();
   const notif = db.notifications.find(n => n.id === req.params.id);
   if (notif) notif.read = true;
+  dbService.commit();
+  res.json({ success: true });
+});
+
+app.post('/api/notifications/mark-all-read', (req, res) => {
+  const db = dbService.getDb();
+  for (const notif of db.notifications) {
+    const matches = currentUserSession
+      ? !notif.userId || notif.userId === currentUserSession.id || (notif.targetRole && notif.targetRole === currentUserSession.role)
+      : !notif.userId && (!notif.targetRole || notif.targetRole === 'cliente');
+    if (matches) {
+      notif.read = true;
+    }
+  }
   dbService.commit();
   res.json({ success: true });
 });
@@ -947,6 +1410,91 @@ app.get('/api/tourism', (req, res) => {
 
 app.get('/api/admin/stats', (req, res) => {
   res.json(dbService.getAdminStats());
+});
+
+app.get('/api/admin/bookings', (req, res) => {
+  const db = dbService.getDb();
+  const enriched = db.bookings.map(b => ({
+    ...b,
+    receipt: db.receipts.find(r => r.bookingId === b.id) || null
+  }));
+  res.json(enriched);
+});
+
+app.get('/api/admin/tickets', (req, res) => {
+  res.json(dbService.getDb().tickets);
+});
+
+app.post('/api/admin/tickets/:id/cancel', (req, res) => {
+  const { reason } = req.body;
+  const db = dbService.getDb();
+  const ticket = db.tickets.find(t => t.id === req.params.id);
+  if (!ticket) return res.status(404).json({ error: 'Bilhete não encontrado.' });
+
+  ticket.status = 'cancelado';
+  db.auditLogs.unshift({
+    id: `log-${Date.now()}`,
+    adminId: currentUserSession?.id || 'admin',
+    adminName: currentUserSession?.name || 'Administração EKUMBI',
+    action: 'CANCELAMENTO_BILHETE',
+    targetType: 'bilhete',
+    targetId: ticket.id,
+    details: `Bilhete ${ticket.numericCode} (${ticket.passengerName}) cancelado. Motivo: ${reason || 'Solicitação administrativa'}.`,
+    timestamp: new Date().toISOString()
+  });
+
+  dbService.commit();
+  res.json({ success: true, ticket });
+});
+
+app.post('/api/admin/bookings/:id/refund-decision', (req, res) => {
+  const { decision, refundAmount, notes } = req.body; // 'aprovado' | 'rejeitado'
+  const db = dbService.getDb();
+  const booking = db.bookings.find(b => b.id === req.params.id);
+  if (!booking) return res.status(404).json({ error: 'Reserva não encontrada.' });
+
+  booking.refundStatus = decision;
+  if (decision === 'aprovado') {
+    booking.paymentStatus = 'reembolso';
+    booking.refundAmount = typeof refundAmount === 'number' ? refundAmount : booking.totalAmount;
+    // Cancel tickets to release seats
+    for (const t of db.tickets) {
+      if (t.bookingId === booking.id) {
+        t.status = 'cancelado';
+      }
+    }
+  }
+
+  db.auditLogs.unshift({
+    id: `log-${Date.now()}`,
+    adminId: currentUserSession?.id || 'admin',
+    adminName: currentUserSession?.name || 'Administração EKUMBI',
+    action: decision === 'aprovado' ? 'APROVACAO_REEMBOLSO' : 'REJEICAO_REEMBOLSO',
+    targetType: 'reembolso',
+    targetId: booking.id,
+    details: `Pedido de cancelamento/reembolso da reserva ${booking.bookingCode} ${decision}. ${notes || ''}`,
+    timestamp: new Date().toISOString()
+  });
+
+  const msg = decision === 'aprovado'
+    ? `O seu pedido de cancelamento e reembolso para a reserva ${booking.bookingCode} foi aprovado (Valor: ${(booking.refundAmount || booking.totalAmount).toLocaleString('pt-AO')} Kz). Os assentos foram libertados.`
+    : `O seu pedido de cancelamento para a reserva ${booking.bookingCode} não pôde ser aprovado. ${notes || ''}`;
+
+  db.notifications.unshift({
+    id: `notif-ref-${Date.now()}`,
+    userId: booking.userId,
+    title: decision === 'aprovado' ? 'Cancelamento e Reembolso Aprovados' : 'Pedido de Cancelamento Rejeitado',
+    message: msg,
+    type: decision === 'aprovado' ? 'info' : 'aviso',
+    targetRole: 'cliente',
+    createdAt: new Date().toISOString(),
+    read: false
+  });
+
+  dispatchAlert('email', booking.userEmail, msg, `[EKUMBI EXPRESS] Atualização de Reembolso - ${booking.bookingCode}`, { bookingCode: booking.bookingCode });
+
+  dbService.commit();
+  res.json({ success: true, booking });
 });
 
 app.get('/api/admin/clients', (req, res) => {
